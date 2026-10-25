@@ -1,0 +1,10 @@
+# Opt in with -f compose.yaml -f compose.local.yaml.
+# Build app/build/client first; Docker only copies the frontend assets.
+services:
+  goodnight:
+    image: goodnight-uestc-docker:local
+    build:
+      context: .
+    pull_policy: build
+    environment:
+      UESTC_HTTP_TRACE: "${UESTC_HTTP_TRACE:-1}"

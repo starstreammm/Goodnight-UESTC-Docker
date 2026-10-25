@@ -1,0 +1,17 @@
+services:
+  goodnight:
+    image: ${GOODNIGHT_IMAGE:-ghcr.io/starstreammm/goodnight-uestc-docker:latest}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${GOODNIGHT_PORT:-8000}:80"
+    environment:
+      TZ: Asia/Shanghai
+      UESTC_HTTP_TRACE: "${UESTC_HTTP_TRACE:-0}"
+    volumes:
+      - goodnight-data:/app/data
+    shm_size: 1gb
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  goodnight-data:

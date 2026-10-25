@@ -1,0 +1,18 @@
+.git
+**/.venv
+**/node_modules
+**/__pycache__
+**/.DS_Store
+.pytest_cache
+**/data
+.env
+.env.*
+**/dist
+**/*.egg-info
+
+# The SPA is built on the host/CI runner and copied into the runtime image.
+**/build
+**/.react-router
+!app/build/
+!app/build/client/
+!app/build/client/**
