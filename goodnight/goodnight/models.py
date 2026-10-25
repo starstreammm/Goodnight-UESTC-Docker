@@ -22,6 +22,12 @@ class Config(BaseModel):
 class AccountAlias(BaseModel):
     model_config = ConfigDict(extra='forbid')
     alias: str = Field(min_length=1, max_length=80)
+    checkin_time: str | None = None
+
+    @field_validator('checkin_time')
+    @classmethod
+    def valid_window(cls, value):
+        return Config.valid_window(value) if value is not None else None
 
     @field_validator('alias')
     @classmethod

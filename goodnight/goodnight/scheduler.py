@@ -4,8 +4,8 @@ import time
 import json
 import traceback
 from pathlib import Path
-from datetime import datetime, timedelta
-from .policy import now, choose_time, bounds, ZONE
+from datetime import timedelta
+from .policy import now, choose_time, bounds
 from .school import run_checkin, authenticate, SchoolError, request, available_locations, choose_location, location_option, checkin_ticket
 from uestc_login import LoginError
 from uestc_login.client import ServiceUnavailable
@@ -38,7 +38,7 @@ class Scheduler:
     def school_window(account, date):
         try:
             saved = json.loads(account['schedule'] or '{}')
-            if saved.get('date') != date or saved['response']['code'] != 0:
+            if saved.get('date') != date or saved['response']['code'] != 0 or saved['response'].get('ok') is False:
                 return None
             data = saved['response']['data']
             start, end = data['studentCheckinStartOffsetMinute'], data['studentCheckinEndOffsetMinute']
@@ -51,41 +51,60 @@ class Scheduler:
         except (KeyError, TypeError, ValueError):
             return None
 
-    def reschedule(self, ident):
+    def automatic_window(self, account, date):
+        school = self.school_window(account, date)
+        window = school or self.store.config().checkin_time
+        if account['checkin_time']:
+            start, end = window.split('_')
+            preferred_start, preferred_end = account['checkin_time'].split('_')
+            start, end = max(start, preferred_start), min(end, preferred_end)
+            window = f'{start}_{end}' if start < end else None
+        return window, school is not None
+
+    @staticmethod
+    def automatic_bounds(account, date, window, has_school):
+        low, high = bounds(date, window, padding=not account['checkin_time'])
+        if has_school:
+            _, high = bounds(date, window, padding=False)
+        return low, high
+
+    def reschedule(self, ident, *, force=False):
         current = now()
         date = current.date().isoformat()
         with self.store.connect() as db:
             account = db.execute('SELECT * FROM accounts WHERE id=?', (ident,)).fetchone()
             job = db.execute('SELECT * FROM jobs WHERE account_id=? AND date=?', (ident, date)).fetchone()
-            window = self.school_window(account, date)
-            if not window or not job or job['submitted'] or job['status'] not in ('scheduled', 'retry', 'missed'):
+            if not account or not job or job['submitted'] or job['status'] not in ('scheduled', 'retry', 'missed'):
                 return
-            low, _ = bounds(date, window)
-            high = datetime.fromisoformat(date + 'T' + window.split('_')[1]).replace(tzinfo=ZONE)
-            # Preserve an existing random time inside the school's actual window.
-            if not low.isoformat() <= job['scheduled_at'] <= high.isoformat() or job['cutoff'] != high.isoformat():
-                due = max(current, choose_time(date, window))
+            window, has_school = self.automatic_window(account, date)
+            if not window:
+                db.execute("UPDATE jobs SET status='missed',message='random_window_unavailable' WHERE account_id=? AND date=?", (ident, date))
+                return
+            low, high = self.automatic_bounds(account, date, window, has_school)
+            # Keep a pending random time unless the allowed range has changed.
+            if force or not low.isoformat() <= job['scheduled_at'] < high.isoformat() or job['cutoff'] != high.isoformat() or (job['status'] == 'missed' and current < high):
+                due = choose_time(date, window, padding=not account['checkin_time'])
+                if current < high:
+                    due = max(current, due)
                 db.execute("UPDATE jobs SET due=?,scheduled_at=?,cutoff=?,status=?,message=NULL WHERE account_id=? AND date=?",
-                    (due.isoformat(), due.isoformat(), high.isoformat(), 'scheduled' if current <= high else 'missed', ident, date))
+                    (due.isoformat(), due.isoformat(), high.isoformat(), 'scheduled' if current < high else 'missed', ident, date))
 
     def plan(self, current):
         date = current.date().isoformat()
-        config = self.store.config()
-        _, high = bounds(date, config.checkin_time)
         with self.store.connect() as db:
             # A running manual check may legitimately outlive the automatic
             # cutoff. Never replace its progress or erase the last failure.
             db.execute("UPDATE jobs SET message='automatic_window_missed' WHERE message='Service was offline past the allowed window'")
             db.execute("UPDATE jobs SET status='missed',message=COALESCE(NULLIF(message,''),'automatic_window_missed') WHERE status IN ('scheduled','retry') AND cutoff<?", (current.isoformat(),))
             for account in db.execute("SELECT * FROM accounts WHERE status='ready'").fetchall():
-                school_window = self.school_window(account, date)
-                window = school_window or config.checkin_time
-                _, high = bounds(date, window)
-                if school_window:
-                    high = datetime.fromisoformat(date + 'T' + window.split('_')[1]).replace(tzinfo=ZONE)
-                due = choose_time(date, window)
-                db.execute('INSERT OR IGNORE INTO jobs(account_id,date,due,scheduled_at,cutoff,status) VALUES(?,?,?,?,?,?)',
-                    (account['id'], date, due.isoformat(), due.isoformat(), high.isoformat(), 'scheduled' if current <= high else 'missed'))
+                window, has_school = self.automatic_window(account, date)
+                available = window is not None
+                window = window or account['checkin_time']
+                _, high = self.automatic_bounds(account, date, window, has_school)
+                due = choose_time(date, window, padding=not account['checkin_time'])
+                db.execute('INSERT OR IGNORE INTO jobs(account_id,date,due,scheduled_at,cutoff,status,message) VALUES(?,?,?,?,?,?,?)',
+                    (account['id'], date, due.isoformat(), due.isoformat(), high.isoformat(),
+                     'scheduled' if available and current < high else 'missed', None if available else 'random_window_unavailable'))
 
     async def execute(self, job, manual=False):
         ident, date = job['account_id'], job['date']

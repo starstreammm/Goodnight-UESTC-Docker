@@ -93,8 +93,10 @@ async def health():
 async def state():
     store = app.state.store
     with store.connect() as db:
-        accounts = [dict(r) for r in db.execute('SELECT id,username,alias,status,location_key,location_name,wechat_ref FROM accounts ORDER BY id')]
+        accounts = [dict(r) for r in db.execute('SELECT id,username,alias,status,location_key,location_name,wechat_ref,checkin_time,schedule FROM accounts ORDER BY id')]
         for account in accounts:
+            account['school_window'] = Scheduler.school_window(account, now().date().isoformat())
+            account.pop('schedule')
             account.update(store.login.metadata(account['username']))
         jobs = [dict(r) for r in db.execute('SELECT * FROM jobs WHERE date=?', (now().date().isoformat(),))]
     return {'accounts': accounts, 'jobs': jobs, 'busy_accounts': sorted(app.state.scheduler.busy),
@@ -219,8 +221,23 @@ async def rename_account(ident: int, data: AccountAlias):
     if ident in app.state.scheduler.busy:
         raise HTTPException(409, 'This account is busy; try again when it finishes')
     with app.state.store.connect() as db:
-        if not db.execute('UPDATE accounts SET alias=? WHERE id=?', (data.alias, ident)).rowcount:
+        account = db.execute('SELECT * FROM accounts WHERE id=?', (ident,)).fetchone()
+        if not account:
             raise HTTPException(404, 'Account not found')
+        if 'checkin_time' in data.model_fields_set and data.checkin_time is not None:
+            window = Scheduler.school_window(account, now().date().isoformat())
+            if not window:
+                raise HTTPException(409, {'code': 'schedule_unavailable', 'message': 'Today’s school check-in window is unavailable. Try again after it refreshes.'})
+            start, end = window.split('_')
+            preferred_start, preferred_end = data.checkin_time.split('_')
+            if preferred_start < start or preferred_end > end:
+                raise HTTPException(422, {'code': 'invalid_checkin_range', 'message': 'Choose a range inside the available school check-in window.'})
+        db.execute('UPDATE accounts SET alias=? WHERE id=?', (data.alias, ident))
+        changed = 'checkin_time' in data.model_fields_set and data.checkin_time != account['checkin_time']
+        if changed:
+            db.execute('UPDATE accounts SET checkin_time=? WHERE id=?', (data.checkin_time, ident))
+    if changed:
+        app.state.scheduler.reschedule(ident, force=True)
     return {'ok': True}
 
 

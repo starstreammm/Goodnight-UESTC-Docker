@@ -23,14 +23,16 @@ def today_state(r, date):
     return 'done' if status in TERMINAL else 'pending' if status == 'PENDING' else 'unknown'
 
 
-def bounds(date, window):
+def bounds(date, window, *, padding=True):
     start, end = [datetime.fromisoformat(f'{date}T{x}').replace(tzinfo=ZONE) for x in window.split('_')]
+    if not padding:
+        return start, end
     span = end - start
     return start + span * .13, start + span * .87
 
 
-def choose_time(date, window):
-    low, high = bounds(date, window)
+def choose_time(date, window, *, padding=True):
+    low, high = bounds(date, window, padding=padding)
     return low + (high - low) * random.SystemRandom().random()
 
 

@@ -34,7 +34,7 @@ class Store:
                     PRIMARY KEY(account_id,date));
             ''')
             account_columns = {row['name'] for row in db.execute('PRAGMA table_info(accounts)')}
-            for column in ('location_key', 'location_name', 'wechat_ref', 'details', 'schedule'):
+            for column in ('location_key', 'location_name', 'wechat_ref', 'details', 'schedule', 'checkin_time'):
                 if column not in account_columns:
                     db.execute(f'ALTER TABLE accounts ADD COLUMN {column} TEXT')
             for column in ('wechat_lease_started_at', 'wechat_lease_expires_at'):

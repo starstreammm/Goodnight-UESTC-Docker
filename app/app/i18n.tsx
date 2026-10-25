@@ -26,6 +26,8 @@ export function errorText(error:unknown, language:string) {
     if(reason==='invalid_response')return `${action}失败：学校返回了无法识别的响应。`
     return `${action}失败：${error.message}`
   }
+  if(code==='schedule_unavailable')return '暂未获取今日学校签到时段，请等待更新后重试。'
+  if(code==='invalid_checkin_range')return '请选择学校允许的签到时段；如学校安排已更新，请重新打开设置。'
   if(code==='review_unavailable')return '无法获取学校签到安排或位置，请点击重试。'
   if(code==='wechat_pending')return '微信凭据尚未准备好，请稍后再次确认。'
   if(code==='selected_location_unavailable')return '该签到位置已不可用，请重新选择。'
