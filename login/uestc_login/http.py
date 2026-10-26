@@ -8,8 +8,14 @@ import os
 import secrets
 import time
 import httpx
-from .browser import (USER_AGENT, REQUEST_TIMEOUT_MS, REQUEST_DELAY, LOCALE_COOKIE,
-                      browser_headers, restrict_cookies)
+from .browser import (
+    USER_AGENT,
+    REQUEST_TIMEOUT_MS,
+    REQUEST_DELAY,
+    LOCALE_COOKIE,
+    browser_headers,
+    restrict_cookies,
+)
 
 HTTP_LOG = logging.getLogger("uestc_login.http")
 
@@ -167,7 +173,7 @@ class HttpSession:
         max_redirects=0,
         params=None,
         referer=None,
-        site='same-origin',
+        site="same-origin",
         cookie_names=None,
     ):
         if max_redirects != 0:
@@ -179,16 +185,34 @@ class HttpSession:
             async with self.request_lock:
                 # Pace requests separately from their network deadline.
                 await asyncio.sleep(REQUEST_DELAY)
-                if httpx.URL(url).host == 'idas.uestc.edu.cn' and httpx.URL(url).path.endswith('/bfp/info'):
-                    self.client.cookies.set(LOCALE_COOKIE, 'en', domain='idas.uestc.edu.cn', path='/authserver')
-                request = self.client.build_request(method, url, json=data, data=form,
-                    headers=request_headers, timeout=timeout_seconds, params=params)
+                if httpx.URL(url).host == "idas.uestc.edu.cn" and httpx.URL(
+                    url
+                ).path.endswith("/bfp/info"):
+                    self.client.cookies.set(
+                        LOCALE_COOKIE,
+                        "en",
+                        domain="idas.uestc.edu.cn",
+                        path="/authserver",
+                    )
+                request = self.client.build_request(
+                    method,
+                    url,
+                    json=data,
+                    data=form,
+                    headers=request_headers,
+                    timeout=timeout_seconds,
+                    params=params,
+                )
                 restrict_cookies(request, cookie_names)
                 try:
                     async with asyncio.timeout(timeout_seconds):
-                        response = await self.client.send(request, follow_redirects=False)
+                        response = await self.client.send(
+                            request, follow_redirects=False
+                        )
                 except TimeoutError:
-                    raise httpx.ReadTimeout('School request exceeded its total deadline.', request=request) from None
+                    raise httpx.ReadTimeout(
+                        "School request exceeded its total deadline.", request=request
+                    ) from None
         except httpx.HTTPError as error:
             if self.trace:
                 HTTP_LOG.exception(

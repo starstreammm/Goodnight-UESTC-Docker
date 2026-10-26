@@ -1,57 +1,696 @@
-import { useEffect, useState } from 'react'
-import { Alert, Avatar, Box, Button, Chip, CircularProgress, Container, Dialog, DialogActions, DialogContent, DialogTitle, Divider, Menu, MenuItem, Paper, Stack, Typography } from '@mui/material'
-import { Add, Bedtime, InfoOutlined, SettingsOutlined, PlayArrow, MoreHoriz, Translate } from '@mui/icons-material'
-import { api } from '../api'
-import { version } from '../../package.json'
-import { useLanguage, errorText } from '../i18n'
-import LoginDialog, { type LoginTarget } from '../components/LoginDialog'
-import ExpiryProgress from '../components/ExpiryProgress'
-import LocationDialog from '../components/LocationDialog'
-import SchoolDetails, { type SchoolSchedule } from '../components/SchoolDetails'
-import SettingsDialog, { type AccountSettings } from '../components/SettingsDialog'
-type Account = AccountSettings & { id: number; username: string; alias: string; status: string; location_name: string | null; save_password: boolean; uestc_expires_at: number | null; wechat_ref: string | null }
-type Job = { account_id: number; status: string; message: string | null; scheduled_at: string; checked: number }
-type State = { accounts: Account[]; jobs: Job[]; busy_accounts: number[]; date: string }
-type Info = { detail: Record<string, unknown>; schedule: SchoolSchedule; location_name: string | null; uestc_expires_at: number | null; save_password: boolean; wechat: { nickname: string; credential_expires_at: number | null; credential_observed_at?: number | null; status: string; rescan_recommended: boolean } | null; wechat_error: string | null }
-const statusText: Record<string, [string, string]> = { random_window_unavailable: ['Selected range is outside today’s school hours', '所选时段不在今日学校签到时间内'], success: ['Checked in', '已签到'], already_done: ['Recorded / exempt', '已记录 / 免签'], need_login: ['School sign-in required', '学校登录已失效'], wechat_expired: ['WeChat sign-in required', '需要重新登录微信'], scheduled: ['Scheduled', '已安排'], running: ['Checking…', '正在签到…'], retry: ['Retry scheduled', '等待重试'], ready: ['Ready', '就绪'], missed: ['Window missed', '已错过签到时间'], unconfirmed: ['Awaiting confirmation', '结果待确认'], window_not_open: ['Outside check-in hours', '未到签到时间'], window_missed: ['Check-in window closed', '签到时间已结束'], checkin_rejected: ['Submission rejected', '签到被拒绝'], checkin_authorization_required: ['Check-in authorization required', '需要签到授权'], wechat_unavailable: ['WeChat unavailable', '微信服务暂不可用'], ticket_unavailable: ['Could not get check-in ticket', '获取签到凭证失败'], ticket_expired: ['Check-in ticket expired', '签到凭证已过期'], transport_error: ['School unavailable', '学校服务暂不可用'], runtime_error: ['Check failed', '签到检查失败'], unknown_record: ['Could not read today’s record', '无法读取今日记录'] }
+import { useEffect, useState } from "react";
+import {
+    Alert,
+    Avatar,
+    Box,
+    Button,
+    Chip,
+    CircularProgress,
+    Container,
+    Dialog,
+    DialogActions,
+    DialogContent,
+    DialogTitle,
+    Divider,
+    Menu,
+    MenuItem,
+    Paper,
+    Stack,
+    Typography,
+} from "@mui/material";
+import {
+    Add,
+    Bedtime,
+    InfoOutlined,
+    SettingsOutlined,
+    PlayArrow,
+    MoreHoriz,
+    Translate,
+} from "@mui/icons-material";
+import { api } from "../api";
+import { version } from "../../package.json";
+import { useLanguage, errorText } from "../i18n";
+import LoginDialog, { type LoginTarget } from "../components/LoginDialog";
+import ExpiryProgress from "../components/ExpiryProgress";
+import LocationDialog from "../components/LocationDialog";
+import SchoolDetails, {
+    type SchoolSchedule,
+} from "../components/SchoolDetails";
+import SettingsDialog, {
+    type AccountSettings,
+} from "../components/SettingsDialog";
+type Account = AccountSettings & {
+    id: number;
+    username: string;
+    alias: string;
+    status: string;
+    location_name: string | null;
+    save_password: boolean;
+    uestc_expires_at: number | null;
+    wechat_ref: string | null;
+};
+type Job = {
+    account_id: number;
+    status: string;
+    message: string | null;
+    scheduled_at: string;
+    checked: number;
+};
+type State = {
+    accounts: Account[];
+    jobs: Job[];
+    busy_accounts: number[];
+    date: string;
+};
+type Info = {
+    detail: Record<string, unknown>;
+    schedule: SchoolSchedule;
+    location_name: string | null;
+    uestc_expires_at: number | null;
+    save_password: boolean;
+    wechat: {
+        nickname: string;
+        credential_expires_at: number | null;
+        credential_observed_at?: number | null;
+        status: string;
+        rescan_recommended: boolean;
+    } | null;
+    wechat_error: string | null;
+};
+const statusText: Record<string, [string, string]> = {
+    random_window_unavailable: [
+        "Selected range is outside today’s school hours",
+        "所选时段不在今日学校签到时间内",
+    ],
+    success: ["Checked in", "已签到"],
+    already_done: ["Recorded / exempt", "已记录 / 免签"],
+    need_login: ["School sign-in required", "学校登录已失效"],
+    wechat_expired: ["WeChat sign-in required", "需要重新登录微信"],
+    scheduled: ["Scheduled", "已安排"],
+    running: ["Checking…", "正在签到…"],
+    retry: ["Retry scheduled", "等待重试"],
+    ready: ["Ready", "就绪"],
+    missed: ["Window missed", "已错过签到时间"],
+    unconfirmed: ["Awaiting confirmation", "结果待确认"],
+    window_not_open: ["Outside check-in hours", "未到签到时间"],
+    window_missed: ["Check-in window closed", "签到时间已结束"],
+    checkin_rejected: ["Submission rejected", "签到被拒绝"],
+    checkin_authorization_required: [
+        "Check-in authorization required",
+        "需要签到授权",
+    ],
+    wechat_unavailable: ["WeChat unavailable", "微信服务暂不可用"],
+    ticket_unavailable: ["Could not get check-in ticket", "获取签到凭证失败"],
+    ticket_expired: ["Check-in ticket expired", "签到凭证已过期"],
+    transport_error: ["School unavailable", "学校服务暂不可用"],
+    runtime_error: ["Check failed", "签到检查失败"],
+    unknown_record: ["Could not read today’s record", "无法读取今日记录"],
+};
 export default function Home() {
-  const { t, language, toggle } = useLanguage()
-  const [state, setState] = useState<State | null>(null), [error, setError] = useState(''), [busy, setBusy] = useState(false)
-  const [login, setLogin] = useState(false), [identity, setIdentity] = useState({ username: '', alias: '', save_password: false })
-  const [newBrowser, setNewBrowser] = useState(false)
-  const [loginTarget, setLoginTarget] = useState<LoginTarget>('both')
-  const [settings, setSettings] = useState<Account | null>(null), [location, setLocation] = useState<Account | null>(null)
-  const [infoAccount, setInfoAccount] = useState<Account | null>(null), [info, setInfo] = useState<Info | null>(null), [infoError, setInfoError] = useState('')
-  const [more, setMore] = useState<{ account: Account; anchor: HTMLElement } | null>(null), [remove, setRemove] = useState<Account | null>(null)
-  async function refresh() { try { setState(await (await api('/state')).json()) } catch (e) { setError(errorText(e, language)) } }
-  useEffect(() => { void refresh(); const timer = setInterval(() => void refresh(), 5000); return () => clearInterval(timer) }, [language])
-  useEffect(() => { if (!infoAccount) return; let active = true; setInfo(null); setInfoError(''); void api(`/accounts/${infoAccount.id}/info`).then(r => r.json()).then(v => { if (active) setInfo(v) }).catch(e => { if (active) setInfoError(errorText(e, language)) }); return () => { active = false } }, [infoAccount, language])
-  async function action(fn: () => Promise<void>) { setBusy(true); setError(''); try { await fn() } catch (e) { setError(errorText(e, language)) } finally { setBusy(false) } }
-  function signIn(account?: Account, newFingerprint = false, target: LoginTarget = account ? 'school' : 'both') { setIdentity(account ? { username: account.username, alias: account.alias, save_password: account.save_password } : { username: '', alias: '', save_password: false }); setNewBrowser(newFingerprint); setLoginTarget(target); setLogin(true); setMore(null) }
-  const label = (value: string) => statusText[value] ? t(...statusText[value]) : t('Needs attention', '需要处理')
-  const complete = state?.jobs.filter(j => ['success', 'already_done'].includes(j.status)).length || 0
-  return <Container maxWidth={false} className="dashboard" sx={{ p: { xs: 2, md: 3 }, display: 'flex', flexDirection: 'column' }}>
-    <Stack component="header" direction="row" alignItems="center" sx={{ gap: 2, flexWrap: 'wrap', mb: 2 }}>
-      <Stack direction="row" spacing={1.5} alignItems="center" sx={{ flex: 1 }}><Box className="brand"><Bedtime /></Box><Box><Typography fontWeight={750}>GoodNight</Typography><Typography variant="caption" color="text.secondary">{t('UESTC · NIGHT CHECK-IN', '电子科技大学 · 晚安签到')}</Typography></Box></Stack>
-      {state && <Stack direction="row" spacing={1.5} alignItems="center" sx={{ order: { xs: 1, sm: 0 }, width: { xs: '100%', sm: 'auto' } }}>
-        <Typography variant="h5" sx={{ whiteSpace: 'nowrap' }}>{complete} <Box component="span" sx={{ color: 'text.secondary' }}>/ {state.accounts.length}</Box></Typography>
-        <Box><Typography variant="body2" fontWeight={600}>{t('TONIGHT', '今晚')}</Typography><Typography variant="caption" color="text.secondary">{t('Confirmed school records', '学校已确认的记录')}</Typography></Box>
-      </Stack>}
-      <Button startIcon={<Translate />} onClick={toggle}>{language === 'en' ? '中文' : 'English'}</Button>
-    </Stack>
-    {error && <Alert severity="error" onClose={() => setError('')} sx={{ mb: 2 }}>{error}</Alert>}
-    {!state ? <Box sx={{ p: 5 }}><CircularProgress /></Box> : <>
-      <Stack direction="row" justifyContent="space-between" alignItems="center" my={3}><Box><Typography variant="h5">{t('Your accounts', '我的账号')}</Typography><Typography color="text.secondary" variant="body2">{t('School sessions and WeChat, in one place.', '统一管理学校会话与微信登录。')}</Typography></Box><Button variant="contained" startIcon={<Add />} onClick={() => signIn()}>{t('Add account', '添加账号')}</Button></Stack>
-      <Paper variant="outlined" sx={{ overflow: 'auto', flex: 1, minHeight: 160 }}>
-        {!state.accounts.length && <Box textAlign="center" p={5}><Typography variant="h6">{t('Make room for a good night.', '为晚安留一点时间。')}</Typography><Typography color="text.secondary" mt={1}>{t('Connect your first account to get started.', '添加第一个账号，开始自动签到。')}</Typography></Box>}
-        {state.accounts.map((account, i) => { const job = state.jobs.find(j => j.account_id === account.id); const working = state.busy_accounts.includes(account.id); const status = account.status === 'need_login' ? 'need_login' : job?.status || 'ready'; return <Box key={account.id}>{i > 0 && <Divider />}<Box className="account"><Avatar sx={{ bgcolor: '#2d4055', color: '#d4e3c6' }}>{account.alias.slice(0, 1)}</Avatar><Box sx={{ flex: 1, minWidth: 140 }}><Typography fontWeight={650}>{account.alias}</Typography><Typography variant="body2" color="text.secondary">{account.username}</Typography><Typography variant="caption" color="text.secondary">{account.location_name || t('Loading school location…', '正在获取学校签到位置…')}</Typography></Box><Box className="account-log" sx={{ flex: 1.2, minWidth: 150 }}><Typography variant="caption" color="text.secondary">{t('Latest activity', '最近记录')}</Typography><Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{job?.message ? (job.message in statusText ? label(job.message) : job.message) : t('No activity yet', '暂无记录')}</Typography></Box><Box sx={{ minWidth: 140 }}><Chip size="small" label={label(status)} color={['success', 'already_done'].includes(status) ? 'success' : status === 'need_login' ? 'warning' : 'default'} variant="outlined" />{job && <Typography variant="caption" display="block" mt={1}>{t('Scheduled', '计划时间')} · {new Date(job.scheduled_at).toLocaleTimeString(language === 'zh' ? 'zh-CN' : 'en-GB', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit' })}</Typography>}</Box><Stack direction="row" flexWrap="wrap" sx={{ p: 1, gap: 1, '& .MuiButton-root': { p: 1, minWidth: 0, fontSize: 13 } }}><Button startIcon={<InfoOutlined />} onClick={() => setInfoAccount(account)}>{t('Info', '详情')}</Button><Button startIcon={<SettingsOutlined />} disabled={busy || working} onClick={() => setSettings({ ...account })}>{t('Settings', '设置')}</Button><Button startIcon={<PlayArrow />} disabled={busy || working || account.status === 'need_login'} onClick={() => void action(async () => { await api(`/accounts/${account.id}/check-in`, 'POST'); await refresh() })}>{t('Run now', '立即运行')}</Button><Button startIcon={<MoreHoriz />} disabled={busy || working} onClick={e => setMore({ account, anchor: e.currentTarget })}>{t('More', '更多')}</Button></Stack></Box></Box> })}
-      </Paper><Stack component="footer" direction="row" alignItems="center" justifyContent="space-between" sx={{ mt: 2, gap: 1, flexWrap: 'wrap' }}><Typography variant="caption" color="text.secondary">GOODNIGHT / UESTC · Asia/Shanghai · {state.date}</Typography><Chip size="small" variant="outlined" label={`v${version}`} /></Stack>
-    </>}
-    <Menu anchorEl={more?.anchor} open={!!more} onClose={() => setMore(null)}><MenuItem onClick={() => signIn(more!.account)}>{t('Sign in to school again', '重新登录学校')}</MenuItem><MenuItem onClick={() => signIn(more!.account, false, 'wechat')}>{t('Sign in to WeChat again', '重新登录微信')}</MenuItem><MenuItem onClick={() => signIn(more!.account, true)}>{t('Sign in with a new browser fingerprint', '使用新浏览器指纹重新登录')}</MenuItem><MenuItem onClick={() => { setRemove(more!.account); setMore(null) }} sx={{ color: 'error.main' }}>{t('Delete account', '删除账号')}</MenuItem></Menu>
-    <LoginDialog open={login} initial={identity} relogin={!!identity.username} newBrowser={newBrowser} target={loginTarget} onClose={() => setLogin(false)} onSuccess={refresh} />
-    {location && <LocationDialog account={location} onClose={() => setLocation(null)} onSuccess={refresh} />}
-    <Dialog open={!!infoAccount} onClose={() => setInfoAccount(null)} fullWidth maxWidth="sm"><DialogTitle>{t('Account details', '账号详情')} · {infoAccount?.alias}</DialogTitle><DialogContent sx={{ scrollbarWidth: 'none', '&::-webkit-scrollbar': { display: 'none' } }}><Stack spacing={1.5}>{infoError ? <Alert severity="error">{infoError}</Alert> : !info ? <CircularProgress /> : <><ExpiryProgress title={t('School session', '学校会话')} expiresAt={info.uestc_expires_at} startsAt={info.uestc_expires_at ? info.uestc_expires_at - 7 * 86400 : null} /><ExpiryProgress title={t('WeChat credentials', '微信凭据')} expiresAt={info.wechat?.credential_expires_at} startsAt={info.wechat?.credential_observed_at} /><Typography variant="caption" color="text.secondary">{t('WeChat credentials may renew automatically. The server can revoke either session earlier.', '微信凭据可能自动续期；服务器也可能提前使会话失效。')}</Typography>{info.wechat_error && <Alert severity="warning">{label(info.wechat_error)}</Alert>}<Typography>{t('Password saved', '已保存密码')} · {info.save_password ? t('Yes', '是') : t('No', '否')}</Typography><Divider /><SchoolDetails detail={info.detail} schedule={info.schedule} locationName={info.location_name} /></>}</Stack></DialogContent><DialogActions><Button onClick={() => setInfoAccount(null)}>{t('Close', '关闭')}</Button></DialogActions></Dialog>
-    {settings && <SettingsDialog account={settings} onClose={() => setSettings(null)} onSuccess={refresh} onLocation={() => { setLocation(settings); setSettings(null) }} />}
-    <Dialog open={!!remove} onClose={() => !busy && setRemove(null)}><DialogTitle>{t('Delete account', '删除账号')} · {remove?.alias}?</DialogTitle><DialogContent>{t('Remove saved school credentials, check-in history and the linked WeChat account (unless shared by another account).', '删除学校凭据、签到记录及关联微信账号（其他账号仍在使用的微信除外）。')}</DialogContent><DialogActions><Button disabled={busy} onClick={() => setRemove(null)}>{t('Cancel', '取消')}</Button><Button color="error" disabled={busy} onClick={() => void action(async () => { await api(`/accounts/${remove!.id}`, 'DELETE'); setRemove(null); await refresh() })}>{t('Delete', '删除')}</Button></DialogActions></Dialog>
-  </Container>
+    const { t, language, toggle } = useLanguage();
+    const [state, setState] = useState<State | null>(null),
+        [error, setError] = useState(""),
+        [busy, setBusy] = useState(false);
+    const [login, setLogin] = useState(false),
+        [identity, setIdentity] = useState({
+            username: "",
+            alias: "",
+            save_password: false,
+        });
+    const [newBrowser, setNewBrowser] = useState(false);
+    const [loginTarget, setLoginTarget] = useState<LoginTarget>("both");
+    const [settings, setSettings] = useState<Account | null>(null),
+        [location, setLocation] = useState<Account | null>(null);
+    const [infoAccount, setInfoAccount] = useState<Account | null>(null),
+        [info, setInfo] = useState<Info | null>(null),
+        [infoError, setInfoError] = useState("");
+    const [more, setMore] = useState<{
+            account: Account;
+            anchor: HTMLElement;
+        } | null>(null),
+        [remove, setRemove] = useState<Account | null>(null);
+    async function refresh() {
+        try {
+            setState(await (await api("/state")).json());
+        } catch (e) {
+            setError(errorText(e, language));
+        }
+    }
+    useEffect(() => {
+        void refresh();
+        const timer = setInterval(() => void refresh(), 5000);
+        return () => clearInterval(timer);
+    }, [language]);
+    useEffect(() => {
+        if (!infoAccount) return;
+        let active = true;
+        setInfo(null);
+        setInfoError("");
+        void api(`/accounts/${infoAccount.id}/info`)
+            .then((r) => r.json())
+            .then((v) => {
+                if (active) setInfo(v);
+            })
+            .catch((e) => {
+                if (active) setInfoError(errorText(e, language));
+            });
+        return () => {
+            active = false;
+        };
+    }, [infoAccount, language]);
+    async function action(fn: () => Promise<void>) {
+        setBusy(true);
+        setError("");
+        try {
+            await fn();
+        } catch (e) {
+            setError(errorText(e, language));
+        } finally {
+            setBusy(false);
+        }
+    }
+    function signIn(
+        account?: Account,
+        newFingerprint = false,
+        target: LoginTarget = account ? "school" : "both",
+    ) {
+        setIdentity(
+            account
+                ? {
+                      username: account.username,
+                      alias: account.alias,
+                      save_password: account.save_password,
+                  }
+                : { username: "", alias: "", save_password: false },
+        );
+        setNewBrowser(newFingerprint);
+        setLoginTarget(target);
+        setLogin(true);
+        setMore(null);
+    }
+    const label = (value: string) =>
+        statusText[value]
+            ? t(...statusText[value])
+            : t("Needs attention", "需要处理");
+    const complete =
+        state?.jobs.filter((j) =>
+            ["success", "already_done"].includes(j.status),
+        ).length || 0;
+    return (
+        <Container
+            maxWidth={false}
+            className="dashboard"
+            sx={{
+                p: { xs: 2, md: 3 },
+                display: "flex",
+                flexDirection: "column",
+            }}
+        >
+            <Stack
+                component="header"
+                direction="row"
+                alignItems="center"
+                sx={{ gap: 2, flexWrap: "wrap", mb: 2 }}
+            >
+                <Stack
+                    direction="row"
+                    spacing={1.5}
+                    alignItems="center"
+                    sx={{ flex: 1 }}
+                >
+                    <Box className="brand">
+                        <Bedtime />
+                    </Box>
+                    <Box>
+                        <Typography fontWeight={750}>GoodNight</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                            {t(
+                                "UESTC · NIGHT CHECK-IN",
+                                "电子科技大学 · 晚安签到",
+                            )}
+                        </Typography>
+                    </Box>
+                </Stack>
+                {state && (
+                    <Stack
+                        direction="row"
+                        spacing={1.5}
+                        alignItems="center"
+                        sx={{
+                            order: { xs: 1, sm: 0 },
+                            width: { xs: "100%", sm: "auto" },
+                        }}
+                    >
+                        <Typography variant="h5" sx={{ whiteSpace: "nowrap" }}>
+                            {complete}{" "}
+                            <Box
+                                component="span"
+                                sx={{ color: "text.secondary" }}
+                            >
+                                / {state.accounts.length}
+                            </Box>
+                        </Typography>
+                        <Box>
+                            <Typography variant="body2" fontWeight={600}>
+                                {t("TONIGHT", "今晚")}
+                            </Typography>
+                            <Typography
+                                variant="caption"
+                                color="text.secondary"
+                            >
+                                {t(
+                                    "Confirmed school records",
+                                    "学校已确认的记录",
+                                )}
+                            </Typography>
+                        </Box>
+                    </Stack>
+                )}
+                <Button startIcon={<Translate />} onClick={toggle}>
+                    {language === "en" ? "中文" : "English"}
+                </Button>
+            </Stack>
+            {error && (
+                <Alert
+                    severity="error"
+                    onClose={() => setError("")}
+                    sx={{ mb: 2 }}
+                >
+                    {error}
+                </Alert>
+            )}
+            {!state ? (
+                <Box sx={{ p: 5 }}>
+                    <CircularProgress />
+                </Box>
+            ) : (
+                <>
+                    <Stack
+                        direction="row"
+                        justifyContent="space-between"
+                        alignItems="center"
+                        my={3}
+                    >
+                        <Box>
+                            <Typography variant="h5">
+                                {t("Your accounts", "我的账号")}
+                            </Typography>
+                            <Typography color="text.secondary" variant="body2">
+                                {t(
+                                    "School sessions and WeChat, in one place.",
+                                    "统一管理学校会话与微信登录。",
+                                )}
+                            </Typography>
+                        </Box>
+                        <Button
+                            variant="contained"
+                            startIcon={<Add />}
+                            onClick={() => signIn()}
+                        >
+                            {t("Add account", "添加账号")}
+                        </Button>
+                    </Stack>
+                    <Paper
+                        variant="outlined"
+                        sx={{ overflow: "auto", flex: 1, minHeight: 160 }}
+                    >
+                        {!state.accounts.length && (
+                            <Box textAlign="center" p={5}>
+                                <Typography variant="h6">
+                                    {t(
+                                        "Make room for a good night.",
+                                        "为晚安留一点时间。",
+                                    )}
+                                </Typography>
+                                <Typography color="text.secondary" mt={1}>
+                                    {t(
+                                        "Connect your first account to get started.",
+                                        "添加第一个账号，开始自动签到。",
+                                    )}
+                                </Typography>
+                            </Box>
+                        )}
+                        {state.accounts.map((account, i) => {
+                            const job = state.jobs.find(
+                                (j) => j.account_id === account.id,
+                            );
+                            const working = state.busy_accounts.includes(
+                                account.id,
+                            );
+                            const status =
+                                account.status === "need_login"
+                                    ? "need_login"
+                                    : job?.status || "ready";
+                            return (
+                                <Box key={account.id}>
+                                    {i > 0 && <Divider />}
+                                    <Box className="account">
+                                        <Avatar
+                                            sx={{
+                                                bgcolor: "#2d4055",
+                                                color: "#d4e3c6",
+                                            }}
+                                        >
+                                            {account.alias.slice(0, 1)}
+                                        </Avatar>
+                                        <Box sx={{ flex: 1, minWidth: 140 }}>
+                                            <Typography fontWeight={650}>
+                                                {account.alias}
+                                            </Typography>
+                                            <Typography
+                                                variant="body2"
+                                                color="text.secondary"
+                                            >
+                                                {account.username}
+                                            </Typography>
+                                            <Typography
+                                                variant="caption"
+                                                color="text.secondary"
+                                            >
+                                                {account.location_name ||
+                                                    t(
+                                                        "Loading school location…",
+                                                        "正在获取学校签到位置…",
+                                                    )}
+                                            </Typography>
+                                        </Box>
+                                        <Box
+                                            className="account-log"
+                                            sx={{ flex: 1.2, minWidth: 150 }}
+                                        >
+                                            <Typography
+                                                variant="caption"
+                                                color="text.secondary"
+                                            >
+                                                {t(
+                                                    "Latest activity",
+                                                    "最近记录",
+                                                )}
+                                            </Typography>
+                                            <Typography
+                                                variant="body2"
+                                                sx={{
+                                                    overflowWrap: "anywhere",
+                                                }}
+                                            >
+                                                {job?.message
+                                                    ? job.message in statusText
+                                                        ? label(job.message)
+                                                        : job.message
+                                                    : t(
+                                                          "No activity yet",
+                                                          "暂无记录",
+                                                      )}
+                                            </Typography>
+                                        </Box>
+                                        <Box sx={{ minWidth: 140 }}>
+                                            <Chip
+                                                size="small"
+                                                label={label(status)}
+                                                color={
+                                                    [
+                                                        "success",
+                                                        "already_done",
+                                                    ].includes(status)
+                                                        ? "success"
+                                                        : status ===
+                                                            "need_login"
+                                                          ? "warning"
+                                                          : "default"
+                                                }
+                                                variant="outlined"
+                                            />
+                                            {job && (
+                                                <Typography
+                                                    variant="caption"
+                                                    display="block"
+                                                    mt={1}
+                                                >
+                                                    {t("Scheduled", "计划时间")}{" "}
+                                                    ·{" "}
+                                                    {new Date(
+                                                        job.scheduled_at,
+                                                    ).toLocaleTimeString(
+                                                        language === "zh"
+                                                            ? "zh-CN"
+                                                            : "en-GB",
+                                                        {
+                                                            timeZone:
+                                                                "Asia/Shanghai",
+                                                            hour: "2-digit",
+                                                            minute: "2-digit",
+                                                        },
+                                                    )}
+                                                </Typography>
+                                            )}
+                                        </Box>
+                                        <Stack
+                                            direction="row"
+                                            flexWrap="wrap"
+                                            sx={{
+                                                p: 1,
+                                                gap: 1,
+                                                "& .MuiButton-root": {
+                                                    p: 1,
+                                                    minWidth: 0,
+                                                    fontSize: 13,
+                                                },
+                                            }}
+                                        >
+                                            <Button
+                                                startIcon={<InfoOutlined />}
+                                                onClick={() =>
+                                                    setInfoAccount(account)
+                                                }
+                                            >
+                                                {t("Info", "详情")}
+                                            </Button>
+                                            <Button
+                                                startIcon={<SettingsOutlined />}
+                                                disabled={busy || working}
+                                                onClick={() =>
+                                                    setSettings({ ...account })
+                                                }
+                                            >
+                                                {t("Settings", "设置")}
+                                            </Button>
+                                            <Button
+                                                startIcon={<PlayArrow />}
+                                                disabled={
+                                                    busy ||
+                                                    working ||
+                                                    account.status ===
+                                                        "need_login"
+                                                }
+                                                onClick={() =>
+                                                    void action(async () => {
+                                                        await api(
+                                                            `/accounts/${account.id}/check-in`,
+                                                            "POST",
+                                                        );
+                                                        await refresh();
+                                                    })
+                                                }
+                                            >
+                                                {t("Run now", "立即运行")}
+                                            </Button>
+                                            <Button
+                                                startIcon={<MoreHoriz />}
+                                                disabled={busy || working}
+                                                onClick={(e) =>
+                                                    setMore({
+                                                        account,
+                                                        anchor: e.currentTarget,
+                                                    })
+                                                }
+                                            >
+                                                {t("More", "更多")}
+                                            </Button>
+                                        </Stack>
+                                    </Box>
+                                </Box>
+                            );
+                        })}
+                    </Paper>
+                    <Stack
+                        component="footer"
+                        direction="row"
+                        alignItems="center"
+                        justifyContent="space-between"
+                        sx={{ mt: 2, gap: 1, flexWrap: "wrap" }}
+                    >
+                        <Typography variant="caption" color="text.secondary">
+                            GOODNIGHT / UESTC · Asia/Shanghai · {state.date}
+                        </Typography>
+                        <Chip
+                            size="small"
+                            variant="outlined"
+                            label={`v${version}`}
+                        />
+                    </Stack>
+                </>
+            )}
+            <Menu
+                anchorEl={more?.anchor}
+                open={!!more}
+                onClose={() => setMore(null)}
+            >
+                <MenuItem onClick={() => signIn(more!.account)}>
+                    {t("Sign in to school again", "重新登录学校")}
+                </MenuItem>
+                <MenuItem
+                    onClick={() => signIn(more!.account, false, "wechat")}
+                >
+                    {t("Sign in to WeChat again", "重新登录微信")}
+                </MenuItem>
+                <MenuItem onClick={() => signIn(more!.account, true)}>
+                    {t(
+                        "Sign in with a new browser fingerprint",
+                        "使用新浏览器指纹重新登录",
+                    )}
+                </MenuItem>
+                <MenuItem
+                    onClick={() => {
+                        setRemove(more!.account);
+                        setMore(null);
+                    }}
+                    sx={{ color: "error.main" }}
+                >
+                    {t("Delete account", "删除账号")}
+                </MenuItem>
+            </Menu>
+            <LoginDialog
+                open={login}
+                initial={identity}
+                relogin={!!identity.username}
+                newBrowser={newBrowser}
+                target={loginTarget}
+                onClose={() => setLogin(false)}
+                onSuccess={refresh}
+            />
+            {location && (
+                <LocationDialog
+                    account={location}
+                    onClose={() => setLocation(null)}
+                    onSuccess={refresh}
+                />
+            )}
+            <Dialog
+                open={!!infoAccount}
+                onClose={() => setInfoAccount(null)}
+                fullWidth
+                maxWidth="sm"
+            >
+                <DialogTitle>
+                    {t("Account details", "账号详情")} · {infoAccount?.alias}
+                </DialogTitle>
+                <DialogContent
+                    sx={{
+                        scrollbarWidth: "none",
+                        "&::-webkit-scrollbar": { display: "none" },
+                    }}
+                >
+                    <Stack spacing={1.5}>
+                        {infoError ? (
+                            <Alert severity="error">{infoError}</Alert>
+                        ) : !info ? (
+                            <CircularProgress />
+                        ) : (
+                            <>
+                                <ExpiryProgress
+                                    title={t("School session", "学校会话")}
+                                    expiresAt={info.uestc_expires_at}
+                                    startsAt={
+                                        info.uestc_expires_at
+                                            ? info.uestc_expires_at - 7 * 86400
+                                            : null
+                                    }
+                                />
+                                <ExpiryProgress
+                                    title={t("WeChat credentials", "微信凭据")}
+                                    expiresAt={
+                                        info.wechat?.credential_expires_at
+                                    }
+                                    startsAt={
+                                        info.wechat?.credential_observed_at
+                                    }
+                                />
+                                <Typography
+                                    variant="caption"
+                                    color="text.secondary"
+                                >
+                                    {t(
+                                        "WeChat credentials may renew automatically. The server can revoke either session earlier.",
+                                        "微信凭据可能自动续期；服务器也可能提前使会话失效。",
+                                    )}
+                                </Typography>
+                                {info.wechat_error && (
+                                    <Alert severity="warning">
+                                        {label(info.wechat_error)}
+                                    </Alert>
+                                )}
+                                <Typography>
+                                    {t("Password saved", "已保存密码")} ·{" "}
+                                    {info.save_password
+                                        ? t("Yes", "是")
+                                        : t("No", "否")}
+                                </Typography>
+                                <Divider />
+                                <SchoolDetails
+                                    detail={info.detail}
+                                    schedule={info.schedule}
+                                    locationName={info.location_name}
+                                />
+                            </>
+                        )}
+                    </Stack>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setInfoAccount(null)}>
+                        {t("Close", "关闭")}
+                    </Button>
+                </DialogActions>
+            </Dialog>
+            {settings && (
+                <SettingsDialog
+                    account={settings}
+                    onClose={() => setSettings(null)}
+                    onSuccess={refresh}
+                    onLocation={() => {
+                        setLocation(settings);
+                        setSettings(null);
+                    }}
+                />
+            )}
+            <Dialog open={!!remove} onClose={() => !busy && setRemove(null)}>
+                <DialogTitle>
+                    {t("Delete account", "删除账号")} · {remove?.alias}?
+                </DialogTitle>
+                <DialogContent>
+                    {t(
+                        "Remove saved school credentials, check-in history and the linked WeChat account (unless shared by another account).",
+                        "删除学校凭据、签到记录及关联微信账号（其他账号仍在使用的微信除外）。",
+                    )}
+                </DialogContent>
+                <DialogActions>
+                    <Button disabled={busy} onClick={() => setRemove(null)}>
+                        {t("Cancel", "取消")}
+                    </Button>
+                    <Button
+                        color="error"
+                        disabled={busy}
+                        onClick={() =>
+                            void action(async () => {
+                                await api(`/accounts/${remove!.id}`, "DELETE");
+                                setRemove(null);
+                                await refresh();
+                            })
+                        }
+                    >
+                        {t("Delete", "删除")}
+                    </Button>
+                </DialogActions>
+            </Dialog>
+        </Container>
+    );
 }
