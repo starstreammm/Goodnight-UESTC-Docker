@@ -47,7 +47,8 @@ is disabled by default for users.
 
 Developers also need Node.js 24 and npm. Frontend assets **must be built on the
 host**; Docker has no Node stage. The explicit `compose.local.yaml` override builds
-`goodnight-uestc-docker:local` and enables HTTP tracing by default. It is not
+`goodnight-uestc-docker:local` with raw HTTP tracing disabled by default
+(see [diagnostic logging](docs/api.md)). It is not
 automatically loaded for users.
 
 ```sh
@@ -95,7 +96,8 @@ image after checking adapter compatibility.
 Info shows school profile data, schedule and location, the local UESTC session deadline and the latest
 WeChat credential deadline reported by YYB. WeChat credentials may auto-renew;
 the displayed time is not a guaranteed final rescan deadline. Settings supports
-alias and allowed location selection, and forgetting a saved password. More
+Admin-owned account aliases, allowed location selection, and forgetting a saved password.
+User-owned account aliases follow the display name, falling back to the console username. More
 contains sign-in again and deletion. Deleting an account also removes its WeChat
 record unless another school account still references it.
 

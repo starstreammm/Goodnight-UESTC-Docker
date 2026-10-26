@@ -7,11 +7,8 @@ import {
     Chip,
     CircularProgress,
     Container,
-    Dialog,
-    DialogActions,
-    DialogContent,
-    DialogTitle,
     Divider,
+    ListSubheader,
     Menu,
     MenuItem,
     Paper,
@@ -20,94 +17,38 @@ import {
 } from "@mui/material";
 import {
     Add,
-    Bedtime,
     InfoOutlined,
     SettingsOutlined,
     PlayArrow,
     MoreHoriz,
-    Translate,
 } from "@mui/icons-material";
 import { api } from "../api";
 import { version } from "../../package.json";
 import { useLanguage, errorText } from "../i18n";
 import LoginDialog, { type LoginTarget } from "../components/LoginDialog";
-import ExpiryProgress from "../components/ExpiryProgress";
 import LocationDialog from "../components/LocationDialog";
-import SchoolDetails, {
-    type SchoolSchedule,
-} from "../components/SchoolDetails";
-import SettingsDialog, {
-    type AccountSettings,
-} from "../components/SettingsDialog";
-type Account = AccountSettings & {
-    id: number;
-    username: string;
-    alias: string;
-    status: string;
-    location_name: string | null;
-    save_password: boolean;
-    uestc_expires_at: number | null;
-    wechat_ref: string | null;
-};
-type Job = {
-    account_id: number;
-    status: string;
-    message: string | null;
-    scheduled_at: string;
-    checked: number;
-};
-type State = {
-    accounts: Account[];
-    jobs: Job[];
-    busy_accounts: number[];
-    date: string;
-};
-type Info = {
-    detail: Record<string, unknown>;
-    schedule: SchoolSchedule;
-    location_name: string | null;
-    uestc_expires_at: number | null;
-    save_password: boolean;
-    wechat: {
-        nickname: string;
-        credential_expires_at: number | null;
-        credential_observed_at?: number | null;
-        status: string;
-        rescan_recommended: boolean;
-    } | null;
-    wechat_error: string | null;
-};
-const statusText: Record<string, [string, string]> = {
-    random_window_unavailable: [
-        "Selected range is outside today’s school hours",
-        "所选时段不在今日学校签到时间内",
-    ],
-    success: ["Checked in", "已签到"],
-    already_done: ["Recorded / exempt", "已记录 / 免签"],
-    need_login: ["School sign-in required", "学校登录已失效"],
-    wechat_expired: ["WeChat sign-in required", "需要重新登录微信"],
-    scheduled: ["Scheduled", "已安排"],
-    running: ["Checking…", "正在签到…"],
-    retry: ["Retry scheduled", "等待重试"],
-    ready: ["Ready", "就绪"],
-    missed: ["Window missed", "已错过签到时间"],
-    unconfirmed: ["Awaiting confirmation", "结果待确认"],
-    window_not_open: ["Outside check-in hours", "未到签到时间"],
-    window_missed: ["Check-in window closed", "签到时间已结束"],
-    checkin_rejected: ["Submission rejected", "签到被拒绝"],
-    checkin_authorization_required: [
-        "Check-in authorization required",
-        "需要签到授权",
-    ],
-    wechat_unavailable: ["WeChat unavailable", "微信服务暂不可用"],
-    ticket_unavailable: ["Could not get check-in ticket", "获取签到凭证失败"],
-    ticket_expired: ["Check-in ticket expired", "签到凭证已过期"],
-    transport_error: ["School unavailable", "学校服务暂不可用"],
-    runtime_error: ["Check failed", "签到检查失败"],
-    unknown_record: ["Could not read today’s record", "无法读取今日记录"],
-};
-export default function Home() {
-    const { t, language, toggle } = useLanguage();
+import SettingsDialog from "../components/SettingsDialog";
+import { type Account, type State, statusText } from "../accounts";
+import AccountInfoDialog from "../components/AccountInfoDialog";
+import DeleteAccountDialog from "../components/DeleteAccountDialog";
+import ConsoleSettings from "../components/ConsoleSettings";
+import UserDialog, {
+    userActions,
+    type UserAction,
+} from "../components/UserDialog";
+import { useAuth, type User } from "../auth";
+import ConsoleHeader from "../components/ConsoleHeader";
+
+export default function AdminHome() {
+    const { user, setUser, logout } = useAuth();
+    const [consoleSettings, setConsoleSettings] = useState(false);
+    const [userOperation, setUserOperation] = useState<{
+        target: User;
+        mode: UserAction;
+        personal?: boolean;
+    } | null>(null);
+
+    const { t, language } = useLanguage();
     const [state, setState] = useState<State | null>(null),
         [error, setError] = useState(""),
         [busy, setBusy] = useState(false);
@@ -118,12 +59,11 @@ export default function Home() {
             save_password: false,
         });
     const [newBrowser, setNewBrowser] = useState(false);
+    const [aliasEditable, setAliasEditable] = useState(true);
     const [loginTarget, setLoginTarget] = useState<LoginTarget>("both");
     const [settings, setSettings] = useState<Account | null>(null),
         [location, setLocation] = useState<Account | null>(null);
-    const [infoAccount, setInfoAccount] = useState<Account | null>(null),
-        [info, setInfo] = useState<Info | null>(null),
-        [infoError, setInfoError] = useState("");
+    const [infoAccount, setInfoAccount] = useState<Account | null>(null);
     const [more, setMore] = useState<{
             account: Account;
             anchor: HTMLElement;
@@ -131,7 +71,9 @@ export default function Home() {
         [remove, setRemove] = useState<Account | null>(null);
     async function refresh() {
         try {
-            setState(await (await api("/state")).json());
+            const next = await (await api("/state")).json();
+            setState(next);
+            setUser(next.user);
         } catch (e) {
             setError(errorText(e, language));
         }
@@ -141,23 +83,6 @@ export default function Home() {
         const timer = setInterval(() => void refresh(), 5000);
         return () => clearInterval(timer);
     }, [language]);
-    useEffect(() => {
-        if (!infoAccount) return;
-        let active = true;
-        setInfo(null);
-        setInfoError("");
-        void api(`/accounts/${infoAccount.id}/info`)
-            .then((r) => r.json())
-            .then((v) => {
-                if (active) setInfo(v);
-            })
-            .catch((e) => {
-                if (active) setInfoError(errorText(e, language));
-            });
-        return () => {
-            active = false;
-        };
-    }, [infoAccount, language]);
     async function action(fn: () => Promise<void>) {
         setBusy(true);
         setError("");
@@ -183,6 +108,7 @@ export default function Home() {
                   }
                 : { username: "", alias: "", save_password: false },
         );
+        setAliasEditable(account?.owner_role !== "user");
         setNewBrowser(newFingerprint);
         setLoginTarget(target);
         setLogin(true);
@@ -206,70 +132,43 @@ export default function Home() {
                 flexDirection: "column",
             }}
         >
-            <Stack
-                component="header"
-                direction="row"
-                alignItems="center"
-                sx={{ gap: 2, flexWrap: "wrap", mb: 2 }}
+            <ConsoleHeader
+                complete={complete}
+                total={state?.accounts.length}
+                busy={busy}
+                onLogout={() => void action(logout)}
             >
-                <Stack
-                    direction="row"
-                    spacing={1.5}
-                    alignItems="center"
-                    sx={{ flex: 1 }}
+                <Button
+                    startIcon={<SettingsOutlined />}
+                    onClick={() => setConsoleSettings(true)}
                 >
-                    <Box className="brand">
-                        <Bedtime />
-                    </Box>
-                    <Box>
-                        <Typography fontWeight={750}>GoodNight</Typography>
-                        <Typography variant="caption" color="text.secondary">
-                            {t(
-                                "UESTC · NIGHT CHECK-IN",
-                                "电子科技大学 · 晚安签到",
-                            )}
-                        </Typography>
-                    </Box>
-                </Stack>
-                {state && (
-                    <Stack
-                        direction="row"
-                        spacing={1.5}
-                        alignItems="center"
-                        sx={{
-                            order: { xs: 1, sm: 0 },
-                            width: { xs: "100%", sm: "auto" },
-                        }}
-                    >
-                        <Typography variant="h5" sx={{ whiteSpace: "nowrap" }}>
-                            {complete}{" "}
-                            <Box
-                                component="span"
-                                sx={{ color: "text.secondary" }}
-                            >
-                                / {state.accounts.length}
-                            </Box>
-                        </Typography>
-                        <Box>
-                            <Typography variant="body2" fontWeight={600}>
-                                {t("TONIGHT", "今晚")}
-                            </Typography>
-                            <Typography
-                                variant="caption"
-                                color="text.secondary"
-                            >
-                                {t(
-                                    "Confirmed school records",
-                                    "学校已确认的记录",
-                                )}
-                            </Typography>
-                        </Box>
-                    </Stack>
-                )}
-                <Button startIcon={<Translate />} onClick={toggle}>
-                    {language === "en" ? "中文" : "English"}
+                    {t("Settings", "设置")}
                 </Button>
-            </Stack>
+            </ConsoleHeader>
+            {!!user?.must_change_password && (
+                <Alert
+                    severity="warning"
+                    sx={{ mb: 1 }}
+                    action={
+                        <Button
+                            onClick={() =>
+                                setUserOperation({
+                                    target: user,
+                                    mode: "password",
+                                    personal: true,
+                                })
+                            }
+                        >
+                            {t("Change password", "修改密码")}
+                        </Button>
+                    }
+                >
+                    {t(
+                        "Change your initial or reset password to protect this console.",
+                        "请修改初始或重置后的密码，保护管理系统安全。",
+                    )}
+                </Alert>
+            )}
             {error && (
                 <Alert
                     severity="error"
@@ -337,6 +236,16 @@ export default function Home() {
                             const working = state.busy_accounts.includes(
                                 account.id,
                             );
+                            const complete =
+                                !!job &&
+                                (!!job.checked_at ||
+                                    !!job.checked ||
+                                    ["success", "already_done"].includes(
+                                        job.status,
+                                    ));
+                            const shownTime = complete
+                                ? job?.checked_at
+                                : job?.scheduled_at;
                             const status =
                                 account.status === "need_login"
                                     ? "need_login"
@@ -351,11 +260,15 @@ export default function Home() {
                                                 color: "#d4e3c6",
                                             }}
                                         >
-                                            {account.alias.slice(0, 1)}
+                                            {(
+                                                account.real_name ||
+                                                account.username
+                                            ).slice(0, 1)}
                                         </Avatar>
                                         <Box sx={{ flex: 1, minWidth: 140 }}>
                                             <Typography fontWeight={650}>
-                                                {account.alias}
+                                                {account.real_name ||
+                                                    account.username}
                                             </Typography>
                                             <Typography
                                                 variant="body2"
@@ -372,6 +285,33 @@ export default function Home() {
                                                         "Loading school location…",
                                                         "正在获取学校签到位置…",
                                                     )}
+                                            </Typography>
+                                        </Box>
+                                        <Box
+                                            sx={{
+                                                flex: 0.8,
+                                                minWidth: 130,
+                                                overflowWrap: "anywhere",
+                                            }}
+                                        >
+                                            <Typography
+                                                variant="caption"
+                                                color="text.secondary"
+                                            >
+                                                {t(
+                                                    "Associated User",
+                                                    "所属用户",
+                                                )}
+                                            </Typography>
+                                            <Typography variant="body2">
+                                                {account.alias}
+                                            </Typography>
+                                            <Typography
+                                                variant="caption"
+                                                color="text.secondary"
+                                            >
+                                                {account.owner_username} ·{" "}
+                                                {account.owner_role}
                                             </Typography>
                                         </Box>
                                         <Box
@@ -426,21 +366,35 @@ export default function Home() {
                                                     display="block"
                                                     mt={1}
                                                 >
-                                                    {t("Scheduled", "计划时间")}{" "}
+                                                    {complete
+                                                        ? t(
+                                                              "Check-in time",
+                                                              "签到时间",
+                                                          )
+                                                        : t(
+                                                              "Scheduled",
+                                                              "计划时间",
+                                                          )}{" "}
                                                     ·{" "}
-                                                    {new Date(
-                                                        job.scheduled_at,
-                                                    ).toLocaleTimeString(
-                                                        language === "zh"
-                                                            ? "zh-CN"
-                                                            : "en-GB",
-                                                        {
-                                                            timeZone:
-                                                                "Asia/Shanghai",
-                                                            hour: "2-digit",
-                                                            minute: "2-digit",
-                                                        },
-                                                    )}
+                                                    {shownTime
+                                                        ? new Date(
+                                                              shownTime,
+                                                          ).toLocaleTimeString(
+                                                              language === "zh"
+                                                                  ? "zh-CN"
+                                                                  : "en-GB",
+                                                              {
+                                                                  timeZone:
+                                                                      "Asia/Shanghai",
+                                                                  hour: "2-digit",
+                                                                  minute: "2-digit",
+                                                                  second: "2-digit",
+                                                              },
+                                                          )
+                                                        : t(
+                                                              "Not provided by school",
+                                                              "学校未提供时间",
+                                                          )}
                                                 </Typography>
                                             )}
                                         </Box>
@@ -531,10 +485,14 @@ export default function Home() {
                 </>
             )}
             <Menu
+                slotProps={{ list: { dense: true } }}
                 anchorEl={more?.anchor}
                 open={!!more}
                 onClose={() => setMore(null)}
             >
+                <ListSubheader>
+                    {t("ACCOUNT ACTIONS", "账号操作")}
+                </ListSubheader>
                 <MenuItem onClick={() => signIn(more!.account)}>
                     {t("Sign in to school again", "重新登录学校")}
                 </MenuItem>
@@ -558,12 +516,48 @@ export default function Home() {
                 >
                     {t("Delete account", "删除账号")}
                 </MenuItem>
+                <Divider />
+                <ListSubheader>{t("USER ACTIONS", "用户操作")}</ListSubheader>
+                {userActions.map((item) => (
+                    <MenuItem
+                        key={item.mode}
+                        disabled={
+                            (!!more?.account.owner_builtin &&
+                                item.mode === "delete") ||
+                            (more?.account.owner_id === user?.id &&
+                                item.mode === "password")
+                        }
+                        onClick={() => {
+                            const account = more!.account;
+                            setUserOperation({
+                                mode: item.mode,
+                                target: {
+                                    id: account.owner_id,
+                                    username: account.owner_username,
+                                    display_name: account.owner_display_name,
+                                    role: account.owner_role,
+                                    builtin: account.owner_builtin,
+                                    must_change_password: 0,
+                                },
+                            });
+                            setMore(null);
+                        }}
+                        sx={
+                            item.mode === "delete"
+                                ? { color: "error.main" }
+                                : undefined
+                        }
+                    >
+                        {t(...item.label)}
+                    </MenuItem>
+                ))}
             </Menu>
             <LoginDialog
                 open={login}
                 initial={identity}
                 relogin={!!identity.username}
                 newBrowser={newBrowser}
+                aliasEditable={aliasEditable}
                 target={loginTarget}
                 onClose={() => setLogin(false)}
                 onSuccess={refresh}
@@ -575,82 +569,12 @@ export default function Home() {
                     onSuccess={refresh}
                 />
             )}
-            <Dialog
-                open={!!infoAccount}
-                onClose={() => setInfoAccount(null)}
-                fullWidth
-                maxWidth="sm"
-            >
-                <DialogTitle>
-                    {t("Account details", "账号详情")} · {infoAccount?.alias}
-                </DialogTitle>
-                <DialogContent
-                    sx={{
-                        scrollbarWidth: "none",
-                        "&::-webkit-scrollbar": { display: "none" },
-                    }}
-                >
-                    <Stack spacing={1.5}>
-                        {infoError ? (
-                            <Alert severity="error">{infoError}</Alert>
-                        ) : !info ? (
-                            <CircularProgress />
-                        ) : (
-                            <>
-                                <ExpiryProgress
-                                    title={t("School session", "学校会话")}
-                                    expiresAt={info.uestc_expires_at}
-                                    startsAt={
-                                        info.uestc_expires_at
-                                            ? info.uestc_expires_at - 7 * 86400
-                                            : null
-                                    }
-                                />
-                                <ExpiryProgress
-                                    title={t("WeChat credentials", "微信凭据")}
-                                    expiresAt={
-                                        info.wechat?.credential_expires_at
-                                    }
-                                    startsAt={
-                                        info.wechat?.credential_observed_at
-                                    }
-                                />
-                                <Typography
-                                    variant="caption"
-                                    color="text.secondary"
-                                >
-                                    {t(
-                                        "WeChat credentials may renew automatically. The server can revoke either session earlier.",
-                                        "微信凭据可能自动续期；服务器也可能提前使会话失效。",
-                                    )}
-                                </Typography>
-                                {info.wechat_error && (
-                                    <Alert severity="warning">
-                                        {label(info.wechat_error)}
-                                    </Alert>
-                                )}
-                                <Typography>
-                                    {t("Password saved", "已保存密码")} ·{" "}
-                                    {info.save_password
-                                        ? t("Yes", "是")
-                                        : t("No", "否")}
-                                </Typography>
-                                <Divider />
-                                <SchoolDetails
-                                    detail={info.detail}
-                                    schedule={info.schedule}
-                                    locationName={info.location_name}
-                                />
-                            </>
-                        )}
-                    </Stack>
-                </DialogContent>
-                <DialogActions>
-                    <Button onClick={() => setInfoAccount(null)}>
-                        {t("Close", "关闭")}
-                    </Button>
-                </DialogActions>
-            </Dialog>
+            {infoAccount && (
+                <AccountInfoDialog
+                    account={infoAccount}
+                    onClose={() => setInfoAccount(null)}
+                />
+            )}
             {settings && (
                 <SettingsDialog
                     account={settings}
@@ -662,35 +586,26 @@ export default function Home() {
                     }}
                 />
             )}
-            <Dialog open={!!remove} onClose={() => !busy && setRemove(null)}>
-                <DialogTitle>
-                    {t("Delete account", "删除账号")} · {remove?.alias}?
-                </DialogTitle>
-                <DialogContent>
-                    {t(
-                        "Remove saved school credentials, check-in history and the linked WeChat account (unless shared by another account).",
-                        "删除学校凭据、签到记录及关联微信账号（其他账号仍在使用的微信除外）。",
-                    )}
-                </DialogContent>
-                <DialogActions>
-                    <Button disabled={busy} onClick={() => setRemove(null)}>
-                        {t("Cancel", "取消")}
-                    </Button>
-                    <Button
-                        color="error"
-                        disabled={busy}
-                        onClick={() =>
-                            void action(async () => {
-                                await api(`/accounts/${remove!.id}`, "DELETE");
-                                setRemove(null);
-                                await refresh();
-                            })
-                        }
-                    >
-                        {t("Delete", "删除")}
-                    </Button>
-                </DialogActions>
-            </Dialog>
+            {remove && (
+                <DeleteAccountDialog
+                    account={remove}
+                    onClose={() => setRemove(null)}
+                    onSuccess={refresh}
+                />
+            )}
+            {consoleSettings && (
+                <ConsoleSettings
+                    onClose={() => setConsoleSettings(false)}
+                    onSuccess={refresh}
+                />
+            )}
+            {userOperation && (
+                <UserDialog
+                    {...userOperation}
+                    onClose={() => setUserOperation(null)}
+                    onSuccess={refresh}
+                />
+            )}
         </Container>
     );
 }

@@ -23,7 +23,7 @@ class Config(BaseModel):
 
 class AccountAlias(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    alias: str = Field(min_length=1, max_length=80)
+    alias: str | None = Field(default=None, min_length=1, max_length=80)
     checkin_time: str | None = None
 
     @field_validator("checkin_time")
@@ -34,6 +34,8 @@ class AccountAlias(BaseModel):
     @field_validator("alias")
     @classmethod
     def nonblank(cls, value):
+        if value is None:
+            raise ValueError("Alias cannot be null")
         if not value.strip():
             raise ValueError("Alias cannot be blank")
         return value.strip()

@@ -28,8 +28,28 @@ def today_state(r, date):
     return (
         "done"
         if status in TERMINAL
-        else "pending" if status == "PENDING" else "unknown"
+        else "pending"
+        if status == "PENDING"
+        else "unknown"
     )
+
+
+def checkin_timestamp(record, date):
+    if (
+        today_state(record, date) != "done"
+        or record["data"]["recordStatusCode"] != "CHECKED_IN"
+    ):
+        return None
+    value = record["data"].get("checkinTime")
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        timestamp = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=ZONE)
+    return timestamp.astimezone(ZONE).isoformat()
 
 
 def bounds(date, window, *, padding=True):
@@ -69,5 +89,7 @@ def checkin_window(r, date, current):
     return (
         "window_not_open"
         if minute < start
-        else "open" if minute < end else "window_missed"
+        else "open"
+        if minute < end
+        else "window_missed"
     )

@@ -11,6 +11,7 @@ import type { Route } from "./+types/root";
 import { theme } from "./theme";
 import "./app.css";
 import { LanguageProvider } from "./i18n";
+import { AuthProvider } from "./auth";
 
 export function Layout({ children }: { children: React.ReactNode }) {
     return (
@@ -55,7 +56,9 @@ export default function App() {
         <ThemeProvider theme={theme}>
             <CssBaseline />
             <LanguageProvider>
-                <Outlet />
+                <AuthProvider>
+                    <Outlet />
+                </AuthProvider>
             </LanguageProvider>
         </ThemeProvider>
     );

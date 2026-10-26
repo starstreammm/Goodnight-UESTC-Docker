@@ -67,3 +67,85 @@ body {
         overflow: auto;
     }
 }
+
+.user-console {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    min-height: 100vh;
+    min-height: 100dvh;
+    box-sizing: border-box;
+}
+
+.user-content {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    justify-content: center;
+    align-items: stretch;
+}
+
+.user-account-panel {
+    width: 100%;
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.user-account-row {
+    flex-shrink: 0;
+    flex-wrap: wrap;
+}
+
+.user-account-body {
+    display: flex;
+    flex: 1;
+    padding: 16px;
+}
+
+.user-account-details {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 24px;
+    flex: 1;
+    align-items: stretch;
+}
+
+.user-settings {
+    min-width: 0;
+    padding-left: 24px;
+    border-left: 1px solid #344156;
+}
+
+.user-credentials {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+}
+
+@media (max-width: 760px) {
+    .user-account-details {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 16px;
+    }
+
+    .user-settings {
+        padding-top: 16px;
+        padding-left: 0;
+        border-top: 1px solid #344156;
+        border-left: 0;
+    }
+}
+
+button,
+a,
+[role="button"] {
+    touch-action: manipulation;
+}
+
+@media (pointer: coarse) {
+    .MuiInputBase-input {
+        font-size: 16px;
+    }
+}

@@ -5,7 +5,7 @@ import json
 import traceback
 from pathlib import Path
 from datetime import timedelta
-from .policy import now, choose_time, bounds
+from .policy import now, choose_time, bounds, checkin_timestamp
 from .school import (
     run_checkin,
     authenticate,
@@ -80,7 +80,7 @@ class Scheduler:
             end = min(end - 5, 1439)
             if start >= end:
                 return None
-            return f"{start//60:02}:{start%60:02}_{end//60:02}:{end%60:02}"
+            return f"{start // 60:02}:{start % 60:02}_{end // 60:02}:{end % 60:02}"
         except (AttributeError, KeyError, TypeError, ValueError):
             return None
 
@@ -226,6 +226,13 @@ class Scheduler:
                             (name, ident),
                         )
 
+                def remember_checkin(timestamp):
+                    with self.store.connect() as db:
+                        db.execute(
+                            "UPDATE jobs SET checked_at=?,checked=1 WHERE account_id=? AND date=?",
+                            (timestamp, ident, date),
+                        )
+
                 def remember_submission(diagnostic):
                     detail = json.dumps(diagnostic, sort_keys=True)
                     with self.store.connect() as db:
@@ -252,6 +259,7 @@ class Scheduler:
                         job.get("submission_diagnostic") or "null"
                     ),
                     on_submission=remember_submission,
+                    on_checkin=remember_checkin,
                     **(
                         {
                             "ticket_provider": lambda context: self.ticket(
@@ -366,8 +374,14 @@ class Scheduler:
                             else "already_done"
                         )
                         db.execute(
-                            "UPDATE jobs SET status=?,checked=1,message=? WHERE account_id=? AND date=?",
-                            (status, status, ident, now().date().isoformat()),
+                            "UPDATE jobs SET status=?,checked=1,message=?,checked_at=COALESCE(?,checked_at) WHERE account_id=? AND date=?",
+                            (
+                                status,
+                                status,
+                                checkin_timestamp(today, now().date().isoformat()),
+                                ident,
+                                now().date().isoformat(),
+                            ),
                         )
                 self.reschedule(ident)
                 state = await ctx.storage_state()

@@ -16,6 +16,13 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from uestc_login.http import HttpSessions
 from .db import Store
+from .auth import (
+    authorize,
+    router as auth_router,
+    delete_records,
+    cleanup_credentials,
+    current_user,
+)
 from .models import Config, Login, AccountAlias, LocationChoice, SMSCode, CaptchaGesture
 from .policy import now, succeeded
 from .scheduler import Scheduler
@@ -70,7 +77,15 @@ async def lifespan(app):
             lock.close()
 
 
-app = FastAPI(title="GoodNight UESTC", lifespan=lifespan, docs_url=None, redoc_url=None)
+app = FastAPI(
+    title="GoodNight UESTC",
+    lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+    dependencies=[Depends(authorize)],
+)
+app.include_router(auth_router)
 
 
 async def same_origin(request: Request):
@@ -108,16 +123,20 @@ async def health():
 
 
 @app.get("/api/state", dependencies=[Depends(same_origin)])
-async def state():
+async def state(request: Request):
     store = app.state.store
     with store.connect() as db:
         accounts = [
             dict(r)
             for r in db.execute(
-                "SELECT id,username,alias,status,location_key,location_name,wechat_ref,checkin_time,schedule FROM accounts ORDER BY id"
+                "SELECT a.id,a.username,a.alias,a.status,a.location_key,a.location_name,a.wechat_ref,a.checkin_time,a.schedule,a.details, "
+                "u.id AS owner_id,u.username AS owner_username,u.display_name AS owner_display_name,u.role AS owner_role,u.builtin AS owner_builtin "
+                "FROM accounts a JOIN users u ON u.id=a.owner_id WHERE (?='admin' OR a.owner_id=?) ORDER BY a.id",
+                (request.state.user["role"], request.state.user["id"]),
             )
         ]
         for account in accounts:
+            account["real_name"] = real_name(json.loads(account.pop("details") or "{}"))
             account["school_window"] = Scheduler.school_window(
                 account, now().date().isoformat()
             )
@@ -126,14 +145,21 @@ async def state():
         jobs = [
             dict(r)
             for r in db.execute(
-                "SELECT * FROM jobs WHERE date=?", (now().date().isoformat(),)
+                "SELECT jobs.* FROM jobs JOIN accounts ON accounts.id=jobs.account_id "
+                "WHERE date=? AND (?='admin' OR accounts.owner_id=?)",
+                (
+                    now().date().isoformat(),
+                    request.state.user["role"],
+                    request.state.user["id"],
+                ),
             )
         ]
     return {
         "accounts": accounts,
         "jobs": jobs,
-        "busy_accounts": sorted(app.state.scheduler.busy),
-        "config": store.config(),
+        "busy_accounts": sorted(app.state.scheduler.busy & {a["id"] for a in accounts}),
+        "user": request.state.user,
+        **({"config": store.config()} if request.state.user["role"] == "admin" else {}),
         "timezone": "Asia/Shanghai",
         "date": now().date().isoformat(),
     }
@@ -326,7 +352,19 @@ async def rename_account(ident: int, data: AccountAlias):
                         "message": "Choose a range inside the available school check-in window.",
                     },
                 )
-        db.execute("UPDATE accounts SET alias=? WHERE id=?", (data.alias, ident))
+        owner = db.execute(
+            "SELECT role,username,display_name FROM users WHERE id=?",
+            (account["owner_id"],),
+        ).fetchone()
+        alias = data.alias if data.alias is not None else account["alias"]
+        if owner["role"] == "user":
+            alias = owner["display_name"].strip() or owner["username"]
+            if data.alias is not None and data.alias != alias:
+                raise HTTPException(
+                    403,
+                    "Account aliases follow the User display name and cannot be edited separately",
+                )
+        db.execute("UPDATE accounts SET alias=? WHERE id=?", (alias, ident))
         changed = (
             "checkin_time" in data.model_fields_set
             and data.checkin_time != account["checkin_time"]
@@ -342,31 +380,8 @@ async def rename_account(ident: int, data: AccountAlias):
 
 
 @app.delete("/api/accounts/{ident}", dependencies=[Depends(same_origin)])
-async def delete_account(ident: int):
-    if ident in app.state.scheduler.busy:
-        raise HTTPException(409, "Check-in is running; try again when it finishes")
-    store = app.state.store
-    with store.connect() as db:
-        account = db.execute("SELECT * FROM accounts WHERE id=?", (ident,)).fetchone()
-        if not account:
-            raise HTTPException(404, "Account not found")
-        shared = db.execute(
-            "SELECT 1 FROM accounts WHERE wechat_ref=? AND id!=?",
-            (account["wechat_ref"], ident),
-        ).fetchone()
-    app.state.scheduler.busy.add(ident)
-    try:
-        if account["wechat_ref"] and not shared:
-            try:
-                await app.state.wechat.delete(account["wechat_ref"])
-            except WeChatError as error:
-                raise login_error(error) from None
-        store.login.delete(account["username"])
-        with store.connect() as db:
-            db.execute("DELETE FROM accounts WHERE id=?", (ident,))
-    finally:
-        app.state.scheduler.busy.discard(ident)
-    return {"ok": True}
+async def delete_account(ident: int, request: Request, delete_user: bool = True):
+    return delete_records(request, account_id=ident, delete_user=delete_user)
 
 
 @dataclass
@@ -375,6 +390,7 @@ class PendingLogin:
     username: str
     alias: str
     account_id: int | None
+    user_id: int
     login_target: str = "both"
     wechat_authorized: bool = False
     expires: float = field(default_factory=lambda: time.monotonic() + 300)
@@ -392,14 +408,41 @@ class PendingLogin:
     wechat_account: dict | None = field(default=None, repr=False)
 
 
-async def reserve_login(username):
+async def reserve_login(username, user):
     async with app.state.login_lock:
         if len(app.state.logins) >= 2 or username in app.state.logins:
             raise HTTPException(409, "A sign-in is already running; try again shortly")
         with app.state.store.connect() as db:
             account = db.execute(
-                "SELECT id FROM accounts WHERE username=?", (username,)
+                "SELECT id,owner_id FROM accounts WHERE username=?", (username,)
             ).fetchone()
+            if db.execute(
+                "SELECT 1 FROM credential_cleanup WHERE username=?", (username,)
+            ).fetchone():
+                raise HTTPException(
+                    409,
+                    "Previous account credentials are being removed. Try again shortly",
+                )
+            if (
+                account
+                and user["role"] != "admin"
+                and account["owner_id"] != user["id"]
+            ):
+                raise HTTPException(403, "This school account is not available")
+            if (
+                not account
+                and user["role"] == "user"
+                and (
+                    db.execute(
+                        "SELECT 1 FROM accounts WHERE owner_id=?", (user["id"],)
+                    ).fetchone()
+                    or any(
+                        p.user_id == user["id"]
+                        for p in app.state.pending_logins.values()
+                    )
+                )
+            ):
+                raise HTTPException(409, "Users may own only one Account")
         if account and account["id"] in app.state.scheduler.busy:
             raise HTTPException(409, "This account is checking in; try again shortly")
         app.state.logins.add(username)
@@ -501,6 +544,7 @@ async def expire_logins_loop():
     while True:
         await asyncio.sleep(10)
         await expire_logins()
+        await cleanup_credentials(app)
 
 
 def expired_error():
@@ -572,9 +616,20 @@ async def prepare_review(pending):
         option["key"] == key for option in options
     )
     pending.locations = locations
+    with app.state.store.connect() as db:
+        owner = db.execute(
+            "SELECT role,username,display_name FROM users WHERE id=COALESCE("
+            "(SELECT owner_id FROM accounts WHERE id=?),?)",
+            (pending.account_id, pending.user_id),
+        ).fetchone()
+    alias = (
+        owner["display_name"].strip() or owner["username"]
+        if owner["role"] == "user"
+        else pending.alias.strip() or real_name(detail) or pending.username
+    )
     pending.review = {
         "username": pending.username,
-        "alias": pending.alias.strip() or real_name(detail) or pending.username,
+        "alias": alias,
         "detail": detail,
         "schedule": {"date": now().date().isoformat(), "response": schedule},
         "locations": options,
@@ -632,9 +687,10 @@ async def step_response(ident, pending):
         raise login_error(error) from None
 
 
-async def begin_login(data):
+async def begin_login(data, request):
     await expire_logins()
-    account_id = await reserve_login(data.username)
+    user = current_user(request)
+    account_id = await reserve_login(data.username, user)
     if data.login_target != "both" and account_id is None:
         release_login(data.username, account_id)
         raise HTTPException(
@@ -642,7 +698,12 @@ async def begin_login(data):
         )
     ident = secrets.token_urlsafe(24)
     pending = PendingLogin(
-        None, data.username, data.alias, account_id, login_target=data.login_target
+        None,
+        data.username,
+        data.alias,
+        account_id,
+        user["id"],
+        login_target=data.login_target,
     )
     app.state.pending_logins[ident] = pending
     async with pending.lock:
@@ -664,7 +725,11 @@ async def begin_login(data):
         password = (
             data.password.get_secret_value()
             if data.password
-            else app.state.store.login.load(data.username).get("password")
+            else (
+                app.state.store.login.load(data.username).get("password")
+                if account_id is not None
+                else None
+            )
         )
         if not password:
             await close_login(ident, pending)
@@ -713,8 +778,8 @@ async def begin_login(data):
 
 
 @app.post("/api/accounts", dependencies=[Depends(same_origin)], status_code=201)
-async def add_account(data: Login):
-    return await begin_login(data)
+async def add_account(data: Login, request: Request):
+    return await begin_login(data, request)
 
 
 @app.post("/api/logins/{ident}/code", dependencies=[Depends(same_origin)])
@@ -844,7 +909,7 @@ def review_response(ident, pending):
 
 
 @app.post("/api/logins/{ident}/confirm", dependencies=[Depends(same_origin)])
-async def confirm_login(ident: str, choice: LocationChoice):
+async def confirm_login(ident: str, choice: LocationChoice, request: Request):
     pending = get_pending(ident)
     async with pending.lock:
         await check_expiry(ident, pending)
@@ -857,6 +922,7 @@ async def confirm_login(ident: str, choice: LocationChoice):
                     pending.qr = None
             except WeChatError as error:
                 raise login_error(error) from None
+            current_user(request)
             with app.state.store.connect() as db:
                 db.execute(
                     "UPDATE accounts SET wechat_ref=?,wechat_lease_started_at=NULL, "
@@ -889,6 +955,17 @@ async def confirm_login(ident: str, choice: LocationChoice):
                 pending.qr = None
         except WeChatError as error:
             raise login_error(error) from None
+        user = current_user(request)
+        with app.state.store.connect() as db:
+            account = db.execute(
+                "SELECT owner_id FROM accounts WHERE username=?", (pending.username,)
+            ).fetchone()
+            if (
+                account
+                and user["role"] != "admin"
+                and account["owner_id"] != user["id"]
+            ):
+                raise HTTPException(403, "Account access changed. Start sign-in again")
         # No account, saved password or scheduler entry is created before this action.
         store, review = app.state.store, pending.review
         store.login.save(
@@ -898,7 +975,9 @@ async def confirm_login(ident: str, choice: LocationChoice):
             pending.save_password,
             fingerprint=pending.new_fingerprint,
         )
-        store.save_session(pending.username, review["alias"], pending.school_state)
+        store.save_session(
+            pending.username, review["alias"], pending.school_state, pending.user_id
+        )
         with store.connect() as db:
             db.execute(
                 "UPDATE accounts SET details=?,schedule=?,location_key=?,location_name=? WHERE username=?",
@@ -991,11 +1070,17 @@ if (static / "assets").is_dir():
 
 
 @app.get("/{path:path}")
-async def spa(path: str):
+async def page(path: str):
     if path.startswith("api/"):
         raise HTTPException(404, "API route not found")
-    if not (static / "index.html").is_file():
+    route = path.rstrip("/")
+    html = (
+        static / route / "index.html"
+        if route in ("", "login", "admin")
+        else static / "__spa-fallback.html"
+    )
+    if not html.is_file():
         raise HTTPException(
             503, "Build the frontend or use the Vite development server"
         )
-    return FileResponse(static / "index.html")
+    return FileResponse(html)

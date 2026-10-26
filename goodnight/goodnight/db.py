@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from cryptography.fernet import Fernet
 from .models import Config
+from .auth import initialize_auth
 from uestc_login import LoginManager
 
 
@@ -52,6 +53,8 @@ class Store:
             job_columns = {row["name"] for row in db.execute("PRAGMA table_info(jobs)")}
             if "scheduled_at" not in job_columns:
                 db.execute("ALTER TABLE jobs ADD COLUMN scheduled_at TEXT")
+            if "checked_at" not in job_columns:
+                db.execute("ALTER TABLE jobs ADD COLUMN checked_at TEXT")
             if "checked" not in job_columns:
                 db.execute(
                     "ALTER TABLE jobs ADD COLUMN checked INTEGER NOT NULL DEFAULT 0"
@@ -65,6 +68,7 @@ class Store:
                 "INSERT OR IGNORE INTO config VALUES(1,?)",
                 (Config().model_dump_json(),),
             )
+            initialize_auth(db)
         self.path.chmod(0o600)
         self.login = LoginManager(self.directory / "login")
 
@@ -85,13 +89,13 @@ class Store:
                 db.execute("SELECT value FROM config").fetchone()[0]
             )
 
-    def save_session(self, username, alias, state):
+    def save_session(self, username, alias, state, owner_id):
         encrypted = self.cipher.encrypt(json.dumps(state).encode())
         with self.connect() as db:
             db.execute(
-                """INSERT INTO accounts(username,alias,session) VALUES(?,?,?)
+                """INSERT INTO accounts(username,alias,session,owner_id) VALUES(?,?,?,?)
                 ON CONFLICT(username) DO UPDATE SET alias=excluded.alias,session=excluded.session,status='ready' """,
-                (username, alias, encrypted),
+                (username, alias, encrypted, owner_id),
             )
             # Reauthentication may resume verification, but never clears a submission journal.
             db.execute(

@@ -7,7 +7,7 @@ import json
 import time
 from uestc_login.http import USER_AGENT
 from uestc_login.browser import REQUEST_TIMEOUT_MS
-from .policy import succeeded, today_state, checkin_window, now
+from .policy import succeeded, today_state, checkin_window, now, checkin_timestamp
 
 ORIGIN = "https://jzsz.uestc.edu.cn"
 
@@ -174,12 +174,17 @@ async def run_checkin(
     on_location=None,
     submission_diagnostic=None,
     on_submission=None,
+    on_checkin=None,
     ticket_provider=None,
 ):
     await authenticate(ctx)
 
     async def today():
-        return await request(ctx, "/student-checkin-record/today")
+        record = await request(ctx, "/student-checkin-record/today")
+        timestamp = checkin_timestamp(record, date)
+        if timestamp and on_checkin:
+            on_checkin(timestamp)
+        return record
 
     record = await today()
     state = today_state(record, date)

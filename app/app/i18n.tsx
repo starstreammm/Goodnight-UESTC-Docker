@@ -89,6 +89,8 @@ export function errorText(error: unknown, language: string) {
     return (
         (
             {
+                wrong_password: "密码错误",
+                invalid_credentials: "用户名或密码错误",
                 invalid_code: "短信验证码有误，请重试。",
                 expired: "登录已过期，请重新开始。",
                 password_missing:

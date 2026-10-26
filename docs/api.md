@@ -4,11 +4,55 @@ Base URL: `http://localhost:8000/api` with the default Compose configuration.
 Send JSON bodies with `Content-Type: application/json`. Successful responses are
 JSON objects without an additional envelope. Responses use `Cache-Control: no-store`.
 
-This is a single-operator API. It has no separate application login or API token.
-Keep it on localhost or behind an authenticated reverse proxy. Requests supplying
-an `Origin` whose host/port differs from `Host` are rejected with HTTP 403.
-The private YYB control credentials, school cookies, passwords and check-in tickets
-are never returned by these endpoints. IDs shown below are synthetic examples.
+The console uses persistent cookie authentication. Log in through `POST /auth/login`
+and send the returned `goodnight_session` cookie on protected requests. Every
+state-changing request also requires `X-Requested-With: GoodNight`. Cross-site
+requests and an `Origin` host/port differing from `Host` are rejected with HTTP 403.
+Only health, login, registration, and the registration-mode query are public.
+Users see only their own Account, jobs, and busy status; Admins see all Accounts
+and the global `config` field.
+`PUT /config` and all User/invitation management endpoints require an Admin.
+Pending school/WeChat login IDs are accessible only to the console User who started them.
+
+The private YYB control credentials, school cookies, password hashes, passwords and
+check-in tickets are never returned. IDs shown below are synthetic examples.
+See [Authentication and deployment](authentication.md) for setup, migration, and
+session/ownership behavior.
+
+## Console authentication and User management
+
+All console usernames use 1–64 ASCII letters, digits, underscores, dots or hyphens,
+with case-insensitive uniqueness. The sole Admin's username is fixed as `admin`.
+Every other identity has the `user` role. Passwords use 8–128 characters. `display_name`
+is optional at creation and accepts up to 80 characters. Unknown body fields are
+rejected, including ownership fields and public registration roles.
+
+| Method | Path | Request / result |
+| --- | --- | --- |
+| GET | `/auth/registration` | Public `{registration_mode: "disabled" / "invitation" / "open"}` |
+| POST | `/auth/login` | `{username,password}`; returns User and sets session cookie; an incorrect password for an existing User returns `401` with `code: "wrong_password"` and `message: "Wrong password"` |
+| POST | `/auth/register` | `{username,password,display_name?,invitation?}`; creates a regular User with no Account and sets session cookie |
+| GET | `/auth/me` | Current User, including `must_change_password` |
+| PATCH | `/auth/me` | `{username,display_name}`; updates personal profile; the Admin username must remain `admin` |
+| DELETE | `/auth/me` | Deletes the current User, sessions, all owned Accounts and jobs, and clears the login cookie; built-in Admin is protected |
+| PUT | `/auth/password` | `{current_password,password}`; changes password, revokes sessions, creates replacement session |
+| POST | `/auth/logout` | Revokes current session and clears its cookie |
+| PUT | `/auth/settings` | Admin: `{registration_mode}`; takes effect immediately |
+| GET | `/invitations` | Admin: codes, creation timestamps and `used_at` |
+| POST | `/invitations` | Admin: generates a single-use code |
+| DELETE | `/invitations/{id}` | Admin: deletes a code; registered Users remain |
+| GET | `/users` | Admin: Users and Account counts; `?empty=true` returns Users without Accounts |
+| GET | `/users/{id}` | Admin: User info and Account count |
+| POST | `/users` | Admin: `{username,password,display_name?,role?}`; the only accepted role is `user`, no Account created |
+| PATCH | `/users/{id}` | Admin: `{username,display_name}` |
+| PUT | `/users/{id}/password` | Admin: `{password}`; revokes target sessions and prompts a password change; use `/auth/password` for yourself |
+| DELETE | `/users/{id}` | Admin: atomically deletes User, sessions, all owned Accounts and jobs; built-in Admin is protected |
+
+Authentication failures return 401, permission failures 403, unavailable Accounts
+404, ownership/operation conflicts 409, invalid input 422, and excessive login or
+registration attempts 429. Invitation errors return 400 and closed registration
+returns 403. Login and registration share persistent 15-minute attempt limits:
+10 per username and 50 per client IP.
 
 ## Endpoints
 
@@ -24,13 +68,26 @@ are never returned by these endpoints. IDs shown below are synthetic examples.
 | POST | `/logins/{login_id}/confirm` | `{"key":null}` or `{"key":"<location-key>"}` | `200 {"state":"done","ok":true}`; confirm and save the reviewed account |
 | DELETE | `/logins/{login_id}` | — | `200 {"ok":true}`; cancels and releases pending resources |
 | GET | `/accounts/{id}/info` | — | `200`, profile, school lease and WeChat metadata |
-| PATCH | `/accounts/{id}` | `{"alias":"My account"}` | `200 {"ok":true}` |
+| PATCH | `/accounts/{id}` | `{"checkin_time":"21:00_23:00"}` and/or `{"alias":"My account"}` | `200 {"ok":true}`; alias editing is allowed only for Admin-owned Accounts |
 | DELETE | `/accounts/{id}/password` | — | `200 {"ok":true}`; forget saved school password |
-| DELETE | `/accounts/{id}` | — | `200 {"ok":true}`; delete account and associated credentials/history |
+| DELETE | `/accounts/{id}` | — | `200 {"ok":true,"user_deleted":false}`; defaults to also deleting a regular owner; use `?delete_user=false` to retain them. Admin owners are always retained. `user_deleted` reports whether the caller was deleted. |
 | GET | `/accounts/{id}/locations` | — | `200`, currently available location choices |
 | PUT | `/accounts/{id}/location` | `{"key":"<location-key>"}` or `{"key":null}` | `200`, location choices and updated selection |
 | POST | `/accounts/{id}/check-in` | — | `202 {"status":"running","date":"2026-10-25"}` |
 | PUT | `/config` | `Config` | `200`, saved configuration |
+
+The state response includes `accounts[].real_name` from the school profile,
+separate from the Account alias. Regular User aliases always follow their console
+display name, falling back to their console username. Profile edits update those
+aliases atomically; independent alias changes are rejected.
+
+`jobs[].checked_at` is the school's `checkinTime` for a confirmed `CHECKED_IN`
+record with the matching `businessDate`, normalized to an ISO timestamp in
+Asia/Shanghai. Both check-in execution and background record refreshes preserve
+it. Confirmed records show this time instead of `scheduled_at`; when the school
+provides no timestamp, the UI says so rather than displaying the scheduled time.
+Current-day confirmed jobs acquire the timestamp on their next school record
+refresh. Older jobs without a stored school timestamp remain unknown.
 
 ## Connect or reconnect an account
 
@@ -48,12 +105,17 @@ POST `/accounts`:
 ```
 
 `username` is required, 1–100 characters without whitespace. `alias` is optional,
-up to 80 characters, and defaults to the school's real name (username if no name
-is available). `password` is 1–512 characters; omit it or use `null` only when a
+up to 80 characters. For Admin-owned Accounts it defaults to the school's real
+name (school username if unavailable). User-owned Accounts always use the owner's
+display name or console username, regardless of the supplied alias.
+`password` is 1–512 characters; omit it or use `null` only when a
 password was previously saved. The school's own form may impose tighter limits.
 `save_password` defaults to `false`; this value applies when login completes.
 Unrecognized fields are rejected. Reusing a username reconnects the existing
-account and preserves its ID and submission journal.
+account and preserves its ID, owner and submission journal. Reconnection requires
+Account access. A newly created Account belongs to the current console User;
+regular Users may own at most one. Manual assignment and ownership transfer are
+not supported.
 
 `login_target` is `both` by default for account creation. Existing accounts can use
 `school` to force a school password login and proceed directly to account review,
@@ -407,9 +469,9 @@ failed session-status check. These fields never include raw school response bodi
 cookies or credentials. School requests wait 0.3 seconds before sending and allow
 30 seconds for the complete network response.
 
-The user-facing `compose.yaml` defaults to `UESTC_HTTP_TRACE=0`. The explicit
-`compose.local.yaml` override defaults to `1` for local diagnostics. When enabled,
-school requests and responses are
+Both `compose.yaml` and `compose.local.yaml` default to `UESTC_HTTP_TRACE=0`.
+Normal application logging uses `info` and does not dump school response bodies.
+Raw tracing is an explicit diagnostic opt-in only. When enabled, school requests and responses are
 logged in full, with matching request IDs, elapsed time, repeated headers, bodies,
 cookie state and transport exception stacks. Read them with
 `docker compose logs -f --tail=200 goodnight`. Keep raw logs private: they contain

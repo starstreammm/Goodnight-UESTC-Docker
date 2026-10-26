@@ -52,6 +52,7 @@ export default function LoginDialog({
     initial,
     relogin = false,
     newBrowser = false,
+    aliasEditable = true,
     target = "both",
     onClose,
     onSuccess,
@@ -60,6 +61,7 @@ export default function LoginDialog({
     initial: Identity;
     relogin?: boolean;
     newBrowser?: boolean;
+    aliasEditable?: boolean;
     target?: LoginTarget;
     onClose: () => void;
     onSuccess: () => Promise<void>;
@@ -216,6 +218,7 @@ export default function LoginDialog({
             }
             fullWidth
             maxWidth="sm"
+            slotProps={{ paper: { sx: { overflow: "hidden" } } }}
         >
             <DialogTitle>
                 {pending?.state === "review"
@@ -235,13 +238,25 @@ export default function LoginDialog({
             </DialogTitle>
             <Box
                 component="form"
+                sx={{
+                    display: "flex",
+                    flexDirection: "column",
+                    minHeight: 0,
+                    overflow: "hidden",
+                }}
                 onSubmit={(e) => {
                     e.preventDefault();
                     const form = new FormData(e.currentTarget);
                     void run(() => submit(form));
                 }}
             >
-                <DialogContent>
+                <DialogContent
+                    sx={{
+                        overflowY: "auto",
+                        scrollbarWidth: "none",
+                        "&::-webkit-scrollbar": { display: "none" },
+                    }}
+                >
                     <Stack spacing={2}>
                         <Typography color="text.secondary">
                             {target === "school"
@@ -296,24 +311,26 @@ export default function LoginDialog({
                                         })
                                     }
                                 />
-                                <TextField
-                                    label={t(
-                                        "Alias (optional)",
-                                        "别名（可选）",
-                                    )}
-                                    helperText={t(
-                                        "Defaults to your real name from the school.",
-                                        "留空则使用学校返回的真实姓名。",
-                                    )}
-                                    disabled={busy}
-                                    value={identity.alias}
-                                    onChange={(e) =>
-                                        setIdentity({
-                                            ...identity,
-                                            alias: e.target.value,
-                                        })
-                                    }
-                                />
+                                {aliasEditable && (
+                                    <TextField
+                                        label={t(
+                                            "Alias (optional)",
+                                            "别名（可选）",
+                                        )}
+                                        helperText={t(
+                                            "Defaults to your real name from the school.",
+                                            "留空则使用学校返回的真实姓名。",
+                                        )}
+                                        disabled={busy}
+                                        value={identity.alias}
+                                        onChange={(e) =>
+                                            setIdentity({
+                                                ...identity,
+                                                alias: e.target.value,
+                                            })
+                                        }
+                                    />
+                                )}
                                 <TextField
                                     label={t("School password", "学校密码")}
                                     helperText={
