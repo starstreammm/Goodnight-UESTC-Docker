@@ -31,7 +31,11 @@ docker compose pull
 docker compose up -d
 ```
 
-Open [http://localhost:8000](http://localhost:8000). The named `goodnight-data`
+Open [http://localhost:8000](http://localhost:8000) and log in with the default
+administrator username `admin` and password `yyytttqqq`. Change the default password
+after your first login. Existing installations keep their configured password.
+
+The named `goodnight-data`
 volume persists account state, encrypted credentials, the encryption keys,
 check-in journals and WeChat credentials. Back up the entire volume together.
 The published port binds to localhost. Use a trusted authenticated reverse proxy

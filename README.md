@@ -25,7 +25,10 @@ docker compose pull
 docker compose up -d
 ```
 
-打开 [http://localhost:8000](http://localhost:8000)。`goodnight-data` 数据卷保存
+打开 [http://localhost:8000](http://localhost:8000)，使用默认管理员用户名 `admin`、
+密码 `yyytttqqq` 登录。首次登录后请修改默认密码；已有部署继续使用已设置的密码。
+
+`goodnight-data` 数据卷保存
 学校会话、可选密码、加密密钥、签到提交记录和微信凭据；备份时保留整个数据卷。
 默认端口仅监听本机。远程使用时请通过可信网络或带身份验证的反向代理访问；
 此应用是单管理员控制台。
