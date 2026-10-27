@@ -43,14 +43,14 @@ export default function ConsoleSettings({
     const [showUsed, setShowUsed] = useState(false);
     const [copied, setCopied] = useState<number | null>(null);
     async function load() {
-        const [settings, codes, emptyUsers] = await Promise.all([
+        const [settings, codes, allUsers] = await Promise.all([
             api("/auth/registration").then((r) => r.json()),
             api("/invitations").then((r) => r.json()),
-            api("/users?empty=true").then((r) => r.json()),
+            api("/users").then((r) => r.json()),
         ]);
         setMode(settings.registration_mode);
         setInvitations(codes);
-        setUsers(emptyUsers);
+        setUsers(allUsers.filter((target: User) => target.role !== "admin"));
     }
     async function action(fn: () => Promise<void>) {
         setBusy(true);
@@ -260,7 +260,7 @@ export default function ConsoleSettings({
                             justifyContent="space-between"
                         >
                             <Typography variant="subtitle2">
-                                {t("Users without Accounts", "无账号用户")}
+                                {t("User list", "用户列表")}
                             </Typography>
                             <Button
                                 disabled={busy}
@@ -275,7 +275,7 @@ export default function ConsoleSettings({
                                     variant="body2"
                                     color="text.secondary"
                                 >
-                                    {t("No empty Users", "暂无无账号用户")}
+                                    {t("No users", "暂无用户")}
                                 </Typography>
                             )}
                             {users.map((target) => (

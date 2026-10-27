@@ -127,10 +127,18 @@ export default function LoginPage() {
                             setWrongPassword(false);
                         }}
                         autoComplete="username"
+                        helperText={
+                            register
+                                ? t(
+                                      "1–64 characters: English letters, numbers, underscores (_), dots (.), and hyphens (-) only. Chinese characters and spaces are not allowed.",
+                                      "1–64 个字符，仅限英文字母、数字、下划线（_）、点（.）和连字符（-），不能使用中文或空格。",
+                                  )
+                                : undefined
+                        }
                         slotProps={{
                             htmlInput: {
                                 maxLength: 64,
-                                pattern: "[a-zA-Z0-9_.-]+",
+                                pattern: "[a-zA-Z0-9_.\\-]+",
                                 autoCapitalize: "none",
                                 spellCheck: false,
                             },

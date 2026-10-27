@@ -23,6 +23,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
                     content="width=device-width, initial-scale=1"
                 />
                 <meta name="theme-color" content="#101b2d" />
+                <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
                 <title>GoodNight · UESTC</title>
                 <Meta />
                 <Links />

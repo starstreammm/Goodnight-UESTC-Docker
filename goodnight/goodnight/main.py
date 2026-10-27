@@ -50,6 +50,8 @@ async def lifespan(app):
 
     lock = (store.directory / "service.lock").open("a")
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    with store.connect() as db:
+        db.execute("DELETE FROM invitations WHERE used_at IS NOT NULL")
     logging.basicConfig(format="%(asctime)s %(levelname)s %(message)s")
     logging.getLogger("goodnight").setLevel(store.config().log.upper())
     logging.getLogger("uestc_login").setLevel(store.config().log.upper())
