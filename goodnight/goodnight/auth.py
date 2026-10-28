@@ -10,15 +10,18 @@ import time
 from typing import Literal
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, HTTPException, Request, Response
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Response
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 from starlette.concurrency import run_in_threadpool
 
 from .wechat import WeChatError
 
 COOKIE = "goodnight_session"
 SESSION_TTL = 30 * 86400
-USER_FIELDS = "id,username,display_name,role,builtin,must_change_password"
+USER_FIELDS = (
+    "id,username,display_name,role,builtin,must_change_password,language,"
+    "bark_enabled,bark_prompt_dismissed,(bark_key IS NOT NULL) AS bark_configured"
+)
 router = APIRouter(prefix="/api")
 
 
@@ -65,6 +68,18 @@ def initialize_auth(db):
             username TEXT PRIMARY KEY, wechat_ref TEXT)""",
     ):
         db.execute(statement)
+    user_columns = {row["name"] for row in db.execute("PRAGMA table_info(users)")}
+    for name, definition in (
+        ("language", "TEXT NOT NULL DEFAULT 'en' CHECK(language IN ('en','zh'))"),
+        ("bark_key", "BLOB"),
+        ("bark_enabled", "INTEGER NOT NULL DEFAULT 0 CHECK(bark_enabled IN (0,1))"),
+        (
+            "bark_prompt_dismissed",
+            "INTEGER NOT NULL DEFAULT 0 CHECK(bark_prompt_dismissed IN (0,1))",
+        ),
+    ):
+        if name not in user_columns:
+            db.execute(f"ALTER TABLE users ADD COLUMN {name} {definition}")
     admin = db.execute("SELECT id FROM users WHERE builtin=1").fetchone()
     if not admin:
         admin_id = db.execute(
@@ -232,6 +247,28 @@ class Registration(Credentials):
     password: SecretStr = Field(min_length=8, max_length=128)
     display_name: str = Field(default="", max_length=80)
     invitation: str = Field(default="", max_length=128)
+    language: str = Field(default="en", max_length=64)
+
+    @field_validator("language")
+    @classmethod
+    def browser_language(cls, value):
+        return "zh" if value.lower().split("-")[0] == "zh" else "en"
+
+
+class Preferences(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    language: Literal["en", "zh"] = "en"
+    bark_enabled: bool = False
+    bark_key: SecretStr = Field(default=SecretStr(""), max_length=256)
+    bark_prompt_dismissed: Literal[True] = True
+
+    @field_validator("bark_key")
+    @classmethod
+    def device_key(cls, value):
+        key = value.get_secret_value().strip()
+        if key and not all(c.isascii() and (c.isalnum() or c in "-_") for c in key):
+            raise ValueError("Enter the Bark device key, not a URL")
+        return SecretStr(key)
 
 
 class NewUser(Credentials):
@@ -376,8 +413,8 @@ async def register(data: Registration, request: Request, response: Response):
                 if used.rowcount != 1:
                     raise HTTPException(400, "Invalid or used invitation code")
             ident = db.execute(
-                "INSERT INTO users(username,display_name,password_hash,role) VALUES(?,?,?,'user')",
-                (data.username, data.display_name.strip(), encoded),
+                "INSERT INTO users(username,display_name,password_hash,role,language) VALUES(?,?,?,'user',?)",
+                (data.username, data.display_name.strip(), encoded, data.language),
             ).lastrowid
             create_session(db, ident, request, response)
             return public_user(db, ident)
@@ -388,6 +425,41 @@ async def register(data: Registration, request: Request, response: Response):
 @router.get("/auth/me")
 async def me(request: Request):
     return request.state.user
+
+
+@router.patch("/auth/preferences")
+async def preferences(
+    data: Preferences, request: Request, background_tasks: BackgroundTasks
+):
+    store, ident = request.app.state.store, request.state.user["id"]
+    updates = data.model_dump(exclude_unset=True)
+    if "bark_key" in updates:
+        key = data.bark_key.get_secret_value()
+        updates["bark_key"] = store.cipher.encrypt(key.encode()) if key else None
+        if not key:
+            updates["bark_enabled"] = False
+    with store.connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        was_enabled = db.execute(
+            "SELECT bark_enabled FROM users WHERE id=?", (ident,)
+        ).fetchone()[0]
+        if updates.get("bark_enabled"):
+            key = updates.get("bark_key") or db.execute(
+                "SELECT bark_key FROM users WHERE id=?", (ident,)
+            ).fetchone()[0]
+            if not key:
+                raise HTTPException(
+                    400, "Configure a Bark key before enabling notifications"
+                )
+        if updates:
+            columns = ",".join(f"{column}=?" for column in updates)
+            db.execute(
+                f"UPDATE users SET {columns} WHERE id=?", (*updates.values(), ident)
+            )
+        user = public_user(db, ident)
+    if not was_enabled and user["bark_enabled"]:
+        background_tasks.add_task(request.app.state.scheduler.bark.send_test, ident)
+    return user
 
 
 @router.post("/auth/logout")

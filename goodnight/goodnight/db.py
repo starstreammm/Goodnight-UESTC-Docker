@@ -69,6 +69,13 @@ class Store:
                 (Config().model_dump_json(),),
             )
             initialize_auth(db)
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS bark_events (
+                    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                    event TEXT NOT NULL, occurrence TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    PRIMARY KEY(account_id,event,occurrence))
+            """)
         self.path.chmod(0o600)
         self.login = LoginManager(self.directory / "login")
 

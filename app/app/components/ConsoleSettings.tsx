@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
     Alert,
     Box,
@@ -18,6 +18,7 @@ import { api } from "../api";
 import { useAuth, type User } from "../auth";
 import { useLanguage, errorText } from "../i18n";
 import UserDialog, { userActions, type UserAction } from "./UserDialog";
+import BarkSettings from "./BarkSettings";
 
 type Invitation = { id: number; code: string; used_at: number | null };
 export default function ConsoleSettings({
@@ -42,15 +43,73 @@ export default function ConsoleSettings({
     const [error, setError] = useState("");
     const [showUsed, setShowUsed] = useState(false);
     const [copied, setCopied] = useState<number | null>(null);
+    const [config, setConfig] = useState<{
+        checkin_time: string;
+        log: string;
+        bark_url: string;
+    } | null>(null);
+    const [barkUrl, setBarkUrl] = useState("");
+    const [destinationSaved, setDestinationSaved] = useState(false);
+    const pendingDestination = useRef<{
+        value: string;
+        timer: ReturnType<typeof setTimeout>;
+    } | null>(null);
+    const destinationRequest = useRef<Promise<boolean> | null>(null);
+
+    async function saveDestination(): Promise<boolean> {
+        if (destinationRequest.current) return destinationRequest.current;
+        const pending = pendingDestination.current;
+        if (!pending || !config) return true;
+        clearTimeout(pending.timer);
+        pendingDestination.current = null;
+        destinationRequest.current = (async () => {
+            setBusy(true);
+            setError("");
+            try {
+                const response = await api("/config", "PUT", {
+                    ...config,
+                    bark_url: pending.value,
+                });
+                const savedConfig = await response.json();
+                setConfig(savedConfig);
+                setBarkUrl(savedConfig.bark_url);
+                setDestinationSaved(true);
+                return true;
+            } catch (error) {
+                setError(errorText(error, language));
+                return false;
+            } finally {
+                setBusy(false);
+                destinationRequest.current = null;
+            }
+        })();
+        return destinationRequest.current;
+    }
+
+    async function close() {
+        if (!busy && (await saveDestination())) onClose();
+    }
+
+    useEffect(() => {
+        return () => {
+            if (pendingDestination.current) {
+                clearTimeout(pendingDestination.current.timer);
+            }
+        };
+    }, []);
+
     async function load() {
-        const [settings, codes, allUsers] = await Promise.all([
+        const [settings, codes, allUsers, state] = await Promise.all([
             api("/auth/registration").then((r) => r.json()),
             api("/invitations").then((r) => r.json()),
             api("/users").then((r) => r.json()),
+            api("/state").then((r) => r.json()),
         ]);
         setMode(settings.registration_mode);
         setInvitations(codes);
         setUsers(allUsers.filter((target: User) => target.role !== "admin"));
+        setConfig(state.config);
+        setBarkUrl(state.config.bark_url);
     }
     async function action(fn: () => Promise<void>) {
         setBusy(true);
@@ -133,14 +192,59 @@ export default function ConsoleSettings({
         <>
             <Dialog
                 open
-                onClose={() => !busy && onClose()}
+                onClose={() => void close()}
                 fullWidth
                 maxWidth="sm"
+                sx={{
+                    "& .MuiDialog-paper, & .MuiDialog-paper *": {
+                        scrollbarWidth: "none",
+                        "&::-webkit-scrollbar": { display: "none" },
+                    },
+                }}
             >
                 <DialogTitle>{t("Settings", "设置")}</DialogTitle>
                 <DialogContent dividers>
                     <Stack spacing={2}>
                         {error && <Alert severity="error">{error}</Alert>}
+                        <TextField
+                            size="small"
+                            label={t(
+                                "Notification destination URL · Admin",
+                                "通知跳转网址 · 管理员",
+                            )}
+                            value={barkUrl}
+                            disabled={!config}
+                            onChange={(event) => {
+                                const value = event.target.value;
+                                setBarkUrl(value);
+                                setDestinationSaved(false);
+                                if (pendingDestination.current) {
+                                    clearTimeout(pendingDestination.current.timer);
+                                }
+                                pendingDestination.current = {
+                                    value,
+                                    timer: setTimeout(
+                                        () => void saveDestination(),
+                                        500,
+                                    ),
+                                };
+                            }}
+                            onBlur={() => void saveDestination()}
+                            helperText={t(
+                                "Optional HTTP(S) URL opened when a notification is tapped. Changes save automatically.",
+                                "可选的 HTTP(S) 网址，点击通知时打开。修改后自动保存。",
+                            )}
+                            slotProps={{
+                                input: { readOnly: busy },
+                                htmlInput: { maxLength: 2048 },
+                            }}
+                        />
+                        {destinationSaved && (
+                            <Alert severity="success">
+                                {t("Destination saved", "跳转网址已保存")}
+                            </Alert>
+                        )}
+                        <Divider />
                         <TextField
                             size="small"
                             select
@@ -366,10 +470,12 @@ export default function ConsoleSettings({
                                 {t("Log out", "退出登录")}
                             </Button>
                         </Stack>
+                        <Divider />
+                        <BarkSettings />
                     </Stack>
                 </DialogContent>
                 <DialogActions>
-                    <Button disabled={busy} onClick={onClose}>
+                    <Button disabled={busy} onClick={() => void close()}>
                         {t("Close", "关闭")}
                     </Button>
                 </DialogActions>

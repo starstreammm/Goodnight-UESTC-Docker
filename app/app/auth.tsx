@@ -7,6 +7,8 @@ import {
 } from "react";
 import { api, ApiError } from "./api";
 
+export const LAST_USERNAME_STORAGE_KEY = "goodnight-last-username:v1";
+
 export type User = {
     id: number;
     username: string;
@@ -15,6 +17,17 @@ export type User = {
     builtin: number;
     must_change_password: number;
     account_count?: number;
+    language?: "en" | "zh";
+    bark_enabled?: number;
+    bark_configured?: number;
+    bark_prompt_dismissed?: number;
+};
+
+export type Preferences = {
+    language?: "en" | "zh";
+    bark_enabled?: boolean;
+    bark_key?: string;
+    bark_prompt_dismissed?: true;
 };
 
 export function userHomePath(user: User) {
@@ -30,6 +43,7 @@ type Auth = {
     setUser: (user: User | null) => void;
     refresh: () => Promise<void>;
     logout: () => Promise<void>;
+    updatePreferences: (preferences: Preferences) => Promise<void>;
 };
 const AuthContext = createContext<Auth | null>(null);
 
@@ -39,7 +53,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [error, setError] = useState("");
     function setUser(next: User | null) {
         setError("");
-        updateUser(next);
+        updateUser((previous) => {
+            // Dismissal is permanent; an older polling response cannot undo it.
+            if (
+                next && previous?.id === next.id && previous.bark_prompt_dismissed
+            ) {
+                return { ...next, bark_prompt_dismissed: 1 };
+            }
+            return next;
+        });
+        if (next) {
+            try {
+                localStorage.setItem(LAST_USERNAME_STORAGE_KEY, next.username);
+            } catch (error) {
+                // Remembering the username is optional when storage is blocked.
+                console.warn("Could not remember the last username", error);
+            }
+        }
     }
     async function refresh() {
         setError("");
@@ -67,9 +97,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await api("/auth/logout", "POST");
         setUser(null);
     }
+    async function updatePreferences(preferences: Preferences) {
+        const response = await api("/auth/preferences", "PATCH", preferences);
+        setUser(await response.json());
+    }
     return (
         <AuthContext.Provider
-            value={{ user, loading, error, setUser, refresh, logout }}
+            value={{
+                user,
+                loading,
+                error,
+                setUser,
+                refresh,
+                logout,
+                updatePreferences,
+            }}
         >
             {children}
         </AuthContext.Provider>

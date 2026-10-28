@@ -2,10 +2,13 @@ import {
     createContext,
     useContext,
     useEffect,
+    useRef,
     useState,
     type ReactNode,
 } from "react";
 import { ApiError } from "./api";
+import { Alert, Snackbar } from "@mui/material";
+import { useAuth } from "./auth";
 type Language = "en" | "zh";
 const Context = createContext({
     language: "en" as Language,
@@ -13,24 +16,42 @@ const Context = createContext({
     t: (en: string, zh: string) => en,
 });
 export function LanguageProvider({ children }: { children: ReactNode }) {
-    const [language, setLanguage] = useState<Language>("en");
+    const { user, updatePreferences } = useAuth();
+    const [guestLanguage, setGuestLanguage] = useState<Language>("en");
+    const [error, setError] = useState("");
+    const saving = useRef(false);
+    const language = user?.language ?? guestLanguage;
     useEffect(() => {
-        const saved = localStorage.getItem("goodnight-language");
-        setLanguage(
-            saved === "zh" || saved === "en"
-                ? saved
-                : navigator.language.toLowerCase().startsWith("zh")
-                  ? "zh"
-                  : "en",
-        );
+        let initial = browserLanguage();
+        try {
+            const saved = localStorage.getItem("goodnight-language");
+            if (saved === "zh" || saved === "en") initial = saved;
+        } catch (error) {
+            console.warn("Could not restore the guest language", error);
+        }
+        setGuestLanguage(initial);
     }, []);
     useEffect(() => {
         document.documentElement.lang = language === "zh" ? "zh-CN" : "en";
     }, [language]);
-    function toggle() {
+    async function toggle() {
+        if (saving.current) return;
+        saving.current = true;
         const next = language === "en" ? "zh" : "en";
-        setLanguage(next);
-        localStorage.setItem("goodnight-language", next);
+        setError("");
+        try {
+            if (user) await updatePreferences({ language: next });
+            setGuestLanguage(next);
+            try {
+                localStorage.setItem("goodnight-language", next);
+            } catch (error) {
+                console.warn("Could not remember the guest language", error);
+            }
+        } catch (error) {
+            setError(errorText(error, language));
+        } finally {
+            saving.current = false;
+        }
     }
     return (
         <Context.Provider
@@ -41,8 +62,16 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
             }}
         >
             {children}
+            <Snackbar open={!!error} onClose={() => setError("")}>
+                <Alert severity="error" onClose={() => setError("")}>
+                    {error}
+                </Alert>
+            </Snackbar>
         </Context.Provider>
     );
+}
+export function browserLanguage(): Language {
+    return navigator.language.toLowerCase().split("-")[0] === "zh" ? "zh" : "en";
 }
 export const useLanguage = () => useContext(Context);
 export function errorText(error: unknown, language: string) {

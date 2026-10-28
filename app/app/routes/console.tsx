@@ -3,6 +3,7 @@ import { Outlet, useLocation } from "react-router";
 import PageRedirect from "../components/PageRedirect";
 import { useAuth, userHomePath } from "../auth";
 import { useLanguage } from "../i18n";
+import BarkPrompt from "../components/BarkPrompt";
 
 export default function ConsoleRoute() {
     const { user, loading, error, refresh } = useAuth();
@@ -25,5 +26,10 @@ export default function ConsoleRoute() {
     if (!user) return <PageRedirect to="/login" />;
     const destination = userHomePath(user);
     if (pathname !== destination) return <PageRedirect to={destination} />;
-    return <Outlet />;
+    return (
+        <>
+            <Outlet />
+            <BarkPrompt key={user.id} />
+        </>
+    );
 }

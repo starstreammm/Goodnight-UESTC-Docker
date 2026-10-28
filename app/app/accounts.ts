@@ -43,6 +43,8 @@ export type Info = {
         nickname: string;
         credential_expires_at: number | null;
         credential_observed_at?: number | null;
+        refresh_token_observed_at: number | null;
+        refresh_token_expires_at: number | null;
         status: string;
         rescan_recommended: boolean;
     } | null;

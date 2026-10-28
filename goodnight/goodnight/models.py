@@ -1,4 +1,5 @@
 import re
+from urllib.parse import urlsplit
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
@@ -7,6 +8,25 @@ class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
     checkin_time: str = "21:00_23:30"
     log: Literal["info", "error", "warning", "debug"] = "info"
+    bark_url: str = Field(default="", max_length=2048)
+
+    @field_validator("bark_url")
+    @classmethod
+    def notification_url(cls, value):
+        value = value.strip()
+        if value:
+            parsed = urlsplit(value)
+            if (
+                parsed.scheme not in ("http", "https")
+                or not parsed.hostname
+                or parsed.username is not None
+                or parsed.password is not None
+                or any(c.isspace() or ord(c) < 32 for c in value)
+            ):
+                raise ValueError(
+                    "Use an absolute HTTP(S) destination URL without credentials"
+                )
+        return value
 
     @field_validator("checkin_time")
     @classmethod

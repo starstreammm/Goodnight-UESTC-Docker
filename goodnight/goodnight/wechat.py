@@ -8,6 +8,7 @@ from pathlib import Path
 import httpx
 
 APP_ID = "wxaa78bf2905f01cee"
+WECHAT_AUTHORIZATION_SECONDS = 30 * 86400
 
 
 class WeChatError(Exception):
@@ -107,16 +108,26 @@ class WeChat:
         accounts = await self.request("GET", "/accounts")
         for account in accounts:
             if str(account["id"]) == str(ref):
-                return {
+                info = {
                     key: account.get(key)
                     for key in (
                         "id",
                         "nickname",
                         "status",
                         "credential_expires_at",
+                        "refresh_token_observed_at",
                         "rescan_recommended",
                     )
                 }
+                observed_at = info["refresh_token_observed_at"]
+                # YYB preserves the scan timestamp across automatic refreshes.
+                # Legacy accounts without it have no known authorization deadline.
+                info["refresh_token_expires_at"] = (
+                    observed_at + WECHAT_AUTHORIZATION_SECONDS
+                    if type(observed_at) is int and observed_at > 0
+                    else None
+                )
+                return info
         raise WeChatError("wechat_expired")
 
     async def code(self, ref):

@@ -42,13 +42,30 @@ class Scheduler:
         self.busy = set()
         self.tasks = set()
         self.last_probe = {}
+        self.bark = None
 
     async def session(self, account):
         if self.wechat is None:
             return self.store.state(account)
-        return await self.store.login.session(
-            self.sessions, account["username"], self.store.state(account)
-        )
+        expired = False
+
+        def on_expired():
+            nonlocal expired
+            expired = True
+            if self.bark:
+                self.bark.session_expired(account)
+
+        try:
+            return await self.store.login.session(
+                self.sessions,
+                account["username"],
+                self.store.state(account),
+                on_expired=on_expired,
+            )
+        except (Exception, asyncio.CancelledError):
+            if expired and self.bark:
+                self.bark.session_expired(account, failed=True)
+            raise
 
     async def ticket(self, context, account):
         if not account["wechat_ref"]:
@@ -232,6 +249,8 @@ class Scheduler:
                             "UPDATE jobs SET checked_at=?,checked=1 WHERE account_id=? AND date=?",
                             (timestamp, ident, date),
                         )
+                    if self.bark:
+                        self.bark.enqueue(account, "checkin_success", date)
 
                 def remember_submission(diagnostic):
                     detail = json.dumps(diagnostic, sort_keys=True)
@@ -331,6 +350,8 @@ class Scheduler:
                 db.execute(
                     "UPDATE accounts SET status='need_login' WHERE id=?", (ident,)
                 )
+        if result == "success" and self.bark:
+            self.bark.enqueue(account, "checkin_success", date)
         log.log(
             logging.INFO if result in ("success", "already_done") else logging.WARNING,
             "Account %s: %s",
@@ -340,6 +361,7 @@ class Scheduler:
 
     async def probe(self, ident):
         ctx = None
+        confirmed_date = None
         try:
             with self.store.connect() as db:
                 account = db.execute(
@@ -383,6 +405,10 @@ class Scheduler:
                                 now().date().isoformat(),
                             ),
                         )
+                        if status == "success":
+                            confirmed_date = now().date().isoformat()
+                if confirmed_date and self.bark:
+                    self.bark.enqueue(account, "checkin_success", confirmed_date)
                 self.reschedule(ident)
                 state = await ctx.storage_state()
                 with self.store.connect() as db:

@@ -326,6 +326,8 @@ GET `/accounts/{id}/info` returns:
     "status": "alive",
     "credential_expires_at": 1793000000,
     "credential_observed_at": 1792900000,
+    "refresh_token_observed_at": 1792900000,
+    "refresh_token_expires_at": 1795492000,
     "rescan_recommended": false
   },
   "wechat_error": null
@@ -335,9 +337,16 @@ GET `/accounts/{id}/info` returns:
 `detail` contains the cached school profile; its fields are school-defined.
 `schedule` is either `{}` or `{"date":"YYYY-MM-DD","response":<school-envelope>}`.
 `location_name` is the selected location's last known name, or null.
-WeChat metadata is fetched when this endpoint is called. Its deadline uses Unix
-seconds and may move after automatic renewal. `wechat` can be `null`; failures are
+WeChat metadata is fetched when this endpoint is called. Timestamps use Unix
+seconds. `wechat` can be `null`; failures are
 reported through `wechat_error`, such as `wechat_expired` or `wechat_unavailable`.
+The UI uses `refresh_token_expires_at` for the deadline requiring a new QR scan:
+`refresh_token_observed_at` (YYB's recorded scan/authorization time) plus
+[30 days, following the pinned YYB source](https://github.com/525815266/YYB-Go-Enhanced/blob/8a9497397abc7bf736be462f2e293f2bc6d4d0c0/internal/protocol/loginbuffer.go#L93-L103).
+Automatic credential refresh does not move this timestamp. Both fields are null
+when YYB has no recorded scan time; no deadline is inferred from account creation
+or the first local observation. The server can revoke authorization earlier.
+`credential_expires_at` remains the short-lived, automatically renewable expiry.
 `credential_observed_at` is the first local observation of the current expiry,
 in Unix seconds. It provides a stable baseline for the remaining-time bar and
 resets when the upstream expiry changes; it is not the credential's issue time.

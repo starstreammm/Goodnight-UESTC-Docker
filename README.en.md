@@ -97,9 +97,11 @@ image after checking adapter compatibility.
    choose **Confirm and save**. Cancelling does not save a new account.
 5. Use **Info**, **Settings**, **Run now**, or **More** on each account.
 
-Info shows school profile data, schedule and location, the local UESTC session deadline and the latest
-WeChat credential deadline reported by YYB. WeChat credentials may auto-renew;
-the displayed time is not a guaranteed final rescan deadline. Settings supports
+Info shows school profile data, schedule and location, the local UESTC session deadline and the
+WeChat authorization deadline: up to 30 days from the QR scan recorded by YYB.
+Automatic credential refresh does not extend this countdown; scan again when it
+expires. Older accounts without a recorded scan time show no deadline, and the
+server can revoke authorization earlier. Settings supports
 Admin-owned account aliases, allowed location selection, and forgetting a saved password.
 User-owned account aliases follow the display name, falling back to the console username. More
 contains sign-in again and deletion. Deleting an account also removes its WeChat

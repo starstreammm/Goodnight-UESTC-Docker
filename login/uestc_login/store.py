@@ -161,7 +161,7 @@ class LoginManager:
             **kwargs
         )
 
-    async def session(self, sessions, username, cached=None):
+    async def session(self, sessions, username, cached=None, *, on_expired=None):
         data = self.load(username)
         if data.get("expires_at", 0) > time.time():
             context = await sessions.new_context(storage_state=cached or data["state"])
@@ -190,6 +190,8 @@ class LoginManager:
                     pass
             finally:
                 await context.close()
+        if on_expired is not None:
+            on_expired()
         password = data.get("password")
         if not password:
             raise PasswordRequired(

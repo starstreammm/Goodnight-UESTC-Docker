@@ -26,6 +26,7 @@ from .auth import (
 from .models import Config, Login, AccountAlias, LocationChoice, SMSCode, CaptchaGesture
 from .policy import now, succeeded
 from .scheduler import Scheduler
+from .bark import Bark
 from uestc_login import submit_sms, LoginError, InvalidCode, Reauth
 from uestc_login.client import validate, ServiceUnavailable
 from uestc_login.browser import REQUEST_TIMEOUT_MS
@@ -61,15 +62,21 @@ async def lifespan(app):
     app.state.login_lock = asyncio.Lock()
     app.state.wechat = WeChat(store.directory)
     app.state.scheduler = Scheduler(store, app.state.sessions, app.state.wechat)
+    app.state.scheduler.bark = Bark(store, app.state.scheduler)
     scheduler = asyncio.create_task(app.state.scheduler.loop())
+    notifications = asyncio.create_task(app.state.scheduler.bark.loop())
     reaper = asyncio.create_task(expire_logins_loop())
     try:
         yield
     finally:
-        for task in [scheduler, reaper, *app.state.scheduler.tasks]:
+        for task in [scheduler, notifications, reaper, *app.state.scheduler.tasks]:
             task.cancel()
         await asyncio.gather(
-            scheduler, reaper, *app.state.scheduler.tasks, return_exceptions=True
+            scheduler,
+            notifications,
+            reaper,
+            *app.state.scheduler.tasks,
+            return_exceptions=True,
         )
         for ident, pending in list(app.state.pending_logins.items()):
             await close_login(ident, pending)
@@ -233,9 +240,7 @@ async def account_locations(ident, choice=None):
     ctx = None
     try:
         async with asyncio.timeout(45):
-            saved = await store.login.session(
-                app.state.sessions, account["username"], store.state(account)
-            )
+            saved = await runner.session(account)
             ctx = await app.state.sessions.new_context(storage_state=saved)
             await authenticate(ctx)
             rows = available_locations(

@@ -56,11 +56,11 @@ export default function App() {
     return (
         <ThemeProvider theme={theme}>
             <CssBaseline />
-            <LanguageProvider>
-                <AuthProvider>
+            <AuthProvider>
+                <LanguageProvider>
                     <Outlet />
-                </AuthProvider>
-            </LanguageProvider>
+                </LanguageProvider>
+            </AuthProvider>
         </ThemeProvider>
     );
 }

@@ -13,6 +13,7 @@ import {
 import { api } from "../api";
 import { useAuth, type User } from "../auth";
 import { useLanguage, errorText } from "../i18n";
+import BarkSettings from "./BarkSettings";
 
 export type UserAction = "view" | "edit" | "password" | "delete" | "create";
 export const userActions: { mode: UserAction; label: [string, string] }[] = [
@@ -246,6 +247,7 @@ export default function UserDialog({
                                 )}
                             </Typography>
                         )}
+                        {personal && mode === "edit" && <BarkSettings />}
                         {mode === "delete" && (
                             <Alert severity="warning">
                                 {t(

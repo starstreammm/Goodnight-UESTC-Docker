@@ -75,17 +75,21 @@ export default function AccountInfoDialog({
                                 }
                             />
                             <ExpiryProgress
-                                title={t("WeChat credentials", "微信凭据")}
-                                expiresAt={info.wechat?.credential_expires_at}
-                                startsAt={info.wechat?.credential_observed_at}
+                                title={t("WeChat authorization", "微信授权")}
+                                expiresAt={
+                                    info.wechat?.refresh_token_expires_at
+                                }
+                                startsAt={
+                                    info.wechat?.refresh_token_observed_at
+                                }
                             />
                             <Typography
                                 variant="caption"
                                 color="text.secondary"
                             >
                                 {t(
-                                    "WeChat credentials may renew automatically. The server can revoke either session earlier.",
-                                    "微信凭据可能自动续期；服务器也可能提前使会话失效。",
+                                    "WeChat authorization lasts up to 30 days after scanning. Scan again when it expires. The server can revoke either session earlier.",
+                                    "微信授权在扫码后最多有效 30 天，到期后需要重新扫码。服务器也可能提前使会话失效。",
                                 )}
                             </Typography>
                             {info.wechat_error && (

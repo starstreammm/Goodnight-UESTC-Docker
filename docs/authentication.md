@@ -18,6 +18,14 @@ loads a new document. `/`, `/login` and `/admin` have prerendered HTML entry poi
 dynamic `/user/<username>` paths use the static-file fallback for direct links
 and refreshes. React Router keeps `ssr: false`.
 
+Share `/login?signup=1` to open registration directly; `/login` opens login.
+The form's login/registration links update the URL and load a new document.
+Registration still follows the administrator's registration policy.
+The browser remembers the last successfully authenticated console username in
+local storage and prefills it on login, including after logout. Registration
+starts with an empty username. Passwords are not stored by this feature; if
+browser storage is blocked, login still works without remembering the username.
+
 The console displays a password-change prompt while the
 initial/reset password is in use. Change it through **Settings → Change password**.
 There is exactly one Admin, whose username is permanently `admin`. The built-in

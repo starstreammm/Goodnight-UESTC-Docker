@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router";
 import PageRedirect from "../components/PageRedirect";
 import {
     Alert,
@@ -12,13 +13,14 @@ import {
     Typography,
 } from "@mui/material";
 import { api, ApiError } from "../api";
-import { useAuth, userHomePath } from "../auth";
-import { useLanguage, errorText } from "../i18n";
+import { LAST_USERNAME_STORAGE_KEY, useAuth, userHomePath } from "../auth";
+import { useLanguage, errorText, browserLanguage } from "../i18n";
 
 export default function LoginPage() {
     const { user, loading, error: sessionError, setUser, refresh } = useAuth();
     const { t, language, toggle } = useLanguage();
-    const [register, setRegister] = useState(false);
+    const [searchParams] = useSearchParams();
+    const register = searchParams.get("signup") === "1";
     const [mode, setMode] = useState("disabled");
     const [username, setUsername] = useState("");
     const [displayName, setDisplayName] = useState("");
@@ -27,6 +29,18 @@ export default function LoginPage() {
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
     const [wrongPassword, setWrongPassword] = useState(false);
+    useEffect(() => {
+        if (register) {
+            setUsername("");
+            return;
+        }
+        try {
+            setUsername(localStorage.getItem(LAST_USERNAME_STORAGE_KEY) || "");
+        } catch (error) {
+            // Login remains available when the browser blocks local storage.
+            console.warn("Could not restore the last username", error);
+        }
+    }, [register]);
     useEffect(() => {
         const load = () =>
             void api("/auth/registration")
@@ -68,9 +82,10 @@ export default function LoginPage() {
                                     password,
                                     ...(register
                                         ? {
-                                              display_name: displayName,
-                                              invitation,
-                                          }
+                                            display_name: displayName,
+                                            invitation,
+                                            language: browserLanguage(),
+                                        }
                                         : {}),
                                 },
                             );
@@ -206,12 +221,7 @@ export default function LoginPage() {
                     {(mode !== "disabled" || register) && (
                         <Button
                             disabled={busy}
-                            onClick={() => {
-                                setRegister(!register);
-                                setError("");
-                                setPassword("");
-                                setWrongPassword(false);
-                            }}
+                            href={register ? "/login" : "/login?signup=1"}
                         >
                             {register
                                 ? t("Back to login", "返回登录")
